@@ -25,7 +25,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // Paths
-const EGGS_PATH = path.join(__dirname, '..', 'eggs', 'eggs-master');
+const EGGS_PATH = path.join(__dirname, '..', 'eggs');
 const SERVER_DATA_PATH = path.join(__dirname, '..', 'server-data');
 const DOCKER_CONFIGS_PATH = path.join(__dirname, '..', 'docker-configs');
 
