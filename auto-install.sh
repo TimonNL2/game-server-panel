@@ -114,6 +114,17 @@ cp .env.example .env
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || echo "localhost")
 sed -i "s/your-server-ip/${SERVER_IP}/g" .env
 
+echo "🥚 Pterodactyl eggs downloaden..."
+if [ ! -d "eggs" ] || [ -z "$(ls -A eggs)" ]; then
+    echo "📥 Downloaden van officiële Pterodactyl eggs..."
+    git clone https://github.com/pterodactyl/eggs.git temp-eggs
+    cp -r temp-eggs/* eggs/
+    rm -rf temp-eggs
+    echo "✅ Eggs geïnstalleerd"
+else
+    echo "✅ Eggs al aanwezig"
+fi
+
 echo "🐳 Panel starten..."
 # Use docker compose (plugin) or docker-compose (standalone)
 if docker compose version &> /dev/null; then
