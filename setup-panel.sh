@@ -6,6 +6,13 @@ set -e
 echo "🚀 Game Server Panel - Panel Setup"
 echo "=================================="
 
+# Determine Docker Compose command
+if docker compose version &> /dev/null; then
+    DOCKER_COMPOSE="docker compose"
+else
+    DOCKER_COMPOSE="docker-compose"
+fi
+
 # Check if Docker is working
 if ! docker --version &> /dev/null; then
     echo "❌ Docker is niet beschikbaar!"
@@ -30,7 +37,7 @@ if [ -d "/opt/game-panel" ]; then
         cd /opt/game-panel
         
         # Stop running containers
-        docker-compose down 2>/dev/null || true
+        $DOCKER_COMPOSE down 2>/dev/null || true
         
         # Pull latest changes
         git pull origin main 2>/dev/null || {
@@ -63,14 +70,21 @@ SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null 
 sed -i "s/your-server-ip/${SERVER_IP}/g" .env
 
 echo "🐳 Panel starten..."
-docker-compose pull
-docker-compose up -d
+# Use docker compose (plugin) or docker-compose (standalone)
+if docker compose version &> /dev/null; then
+    DOCKER_COMPOSE="docker compose"
+else
+    DOCKER_COMPOSE="docker-compose"
+fi
+
+$DOCKER_COMPOSE pull
+$DOCKER_COMPOSE up -d
 
 echo ""
 echo "🎉 Panel is gestart!"
 echo ""
 echo "📊 Status checken:"
-docker-compose ps
+$DOCKER_COMPOSE ps
 
 echo ""
 echo "🌐 Open in browser:"
@@ -78,8 +92,8 @@ echo "   Frontend: http://${SERVER_IP}:3000"
 echo "   Backend:  http://${SERVER_IP}:3001/api/health"
 echo ""
 echo "📝 Logs bekijken:"
-echo "   docker-compose logs -f"
+echo "   $DOCKER_COMPOSE logs -f"
 echo ""
 echo "🛠️  Environment aanpassen:"
 echo "   nano /opt/game-panel/.env"
-echo "   docker-compose restart"
+echo "   $DOCKER_COMPOSE restart"

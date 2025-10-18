@@ -40,7 +40,7 @@ else
 fi
 
 echo "🔧 Docker Compose controleren..."
-if ! command -v docker-compose &> /dev/null; then
+if ! docker compose version &> /dev/null && ! docker-compose --version &> /dev/null; then
     sudo apt install docker-compose-plugin -y
     echo "✅ Docker Compose geïnstalleerd"
 else
@@ -115,8 +115,15 @@ SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null 
 sed -i "s/your-server-ip/${SERVER_IP}/g" .env
 
 echo "🐳 Panel starten..."
-docker-compose pull
-docker-compose up -d
+# Use docker compose (plugin) or docker-compose (standalone)
+if docker compose version &> /dev/null; then
+    DOCKER_COMPOSE="docker compose"
+else
+    DOCKER_COMPOSE="docker-compose"
+fi
+
+$DOCKER_COMPOSE pull
+$DOCKER_COMPOSE up -d
 
 # Wait a moment for containers to start
 echo "⏳ Wachten op containers..."
@@ -126,7 +133,7 @@ echo ""
 echo "🎉 Panel installatie voltooid!"
 echo ""
 echo "📊 Container status:"
-docker-compose ps
+$DOCKER_COMPOSE ps
 
 echo ""
 echo "🌐 Panel openen:"
@@ -134,14 +141,14 @@ echo "   Frontend: http://${SERVER_IP}:3000"
 echo "   Backend:  http://${SERVER_IP}:3001/api/health"
 echo ""
 echo "🛠️  Handige commando's:"
-echo "   Logs bekijken:     docker-compose logs -f"
-echo "   Panel herstarten:  docker-compose restart"
-echo "   Panel stoppen:     docker-compose down"
-echo "   Panel updaten:     git pull && docker-compose up -d --build"
+echo "   Logs bekijken:     $DOCKER_COMPOSE logs -f"
+echo "   Panel herstarten:  $DOCKER_COMPOSE restart"
+echo "   Panel stoppen:     $DOCKER_COMPOSE down"
+echo "   Panel updaten:     git pull && $DOCKER_COMPOSE up -d --build"
 echo ""
 echo "📝 Environment aanpassen:"
 echo "   nano /opt/game-panel/.env"
-echo "   docker-compose restart"
+echo "   $DOCKER_COMPOSE restart"
 echo ""
 echo "🎮 Je kunt nu servers maken via de web interface!"
 
