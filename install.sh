@@ -16,11 +16,21 @@ if [[ $EUID -eq 0 ]]; then
 fi
 
 # Check Ubuntu version
-if ! grep -q "22.04" /etc/os-release; then
-    echo "⚠️  Waarschuwing: Dit script is getest op Ubuntu 22.04"
-    read -p "Doorgaan? (y/N): " -n 1 -r
-    echo
+if ! grep -q "Ubuntu" /etc/os-release; then
+    echo "❌ Dit script is alleen voor Ubuntu!"
+    echo "   Je draait: $(lsb_release -d 2>/dev/null || cat /etc/os-release | grep PRETTY_NAME)"
+    exit 1
+fi
+
+if ! grep -q -E "(20.04|22.04|24.04)" /etc/os-release; then
+    echo "⚠️  Waarschuwing: Dit script is getest op Ubuntu 20.04, 22.04 en 24.04"
+    echo "   Je versie: $(lsb_release -r 2>/dev/null | cut -f2 || grep VERSION_ID /etc/os-release | cut -d'"' -f2)"
+    echo "   Het script kan mogelijk nog steeds werken."
+    echo ""
+    echo "Wil je doorgaan? (y/N)"
+    read -r REPLY
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Installatie geannuleerd."
         exit 1
     fi
 fi
@@ -92,9 +102,23 @@ echo "📖 Zie README.md voor gedetailleerde instructies"
 
 echo ""
 echo "🔄 Wil je nu herstarten om de installatie te voltooien?"
-read -p "Herstart nu? (y/N): " -n 1 -r
-echo
+echo "Na herstart kun je het panel installeren met:"
+echo "git clone https://github.com/TimonNL2/game-server-panel.git /opt/game-panel"
+echo "cd /opt/game-panel && cp .env.example .env && docker-compose up -d"
+echo ""
+echo "Herstart nu? (y/N)"
+read -r REPLY
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo "🔄 Systeem herstart..."
     sudo reboot
+else
+    echo "✅ Installatie voltooid!"
+    echo "⚠️  Log uit en weer in voor Docker permissions, of herstart handmatig"
+    echo ""
+    echo "📋 Volgende stappen:"
+    echo "1. Log uit en weer in (of herstart)"
+    echo "2. git clone https://github.com/TimonNL2/game-server-panel.git /opt/game-panel"
+    echo "3. cd /opt/game-panel"
+    echo "4. cp .env.example .env && nano .env"
+    echo "5. docker-compose up -d"
 fi
