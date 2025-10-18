@@ -327,29 +327,52 @@ app.get('/api/eggs/:category/:subcategory/:egg', async (req, res) => {
 // Create new server
 app.post('/api/servers', async (req, res) => {
   try {
-    const { name, eggPath, environment, ports, memory = 1024 } = req.body;
+    console.log('Creating server with request body:', req.body);
+    
+    const { name, egg, environment, ports, memory = 1024, cpu = 100, disk = 5000 } = req.body;
+    
+    if (!name || !egg) {
+      return res.status(400).json({ error: 'Name and egg are required' });
+    }
+    
     const serverId = uuidv4();
     
+    // Construct egg path for loading
+    const eggPath = `${egg.category}/${egg.subcategory}/${egg.eggName}`;
+    console.log('Loading egg from path:', eggPath);
+    
     // Load egg configuration
-    const [category, subcategory, eggName] = eggPath.split('/');
-    const eggFilePath = path.join(EGGS_PATH, category, subcategory, `egg-${eggName}.json`);
-    const egg = JSON.parse(fs.readFileSync(eggFilePath, 'utf8'));
+    const eggFilePath = path.join(EGGS_PATH, egg.category, egg.subcategory, `egg-${egg.eggName}.json`);
+    
+    if (!fs.existsSync(eggFilePath)) {
+      console.error('Egg file not found:', eggFilePath);
+      return res.status(404).json({ error: 'Egg configuration not found' });
+    }
+    
+    const eggConfig = JSON.parse(fs.readFileSync(eggFilePath, 'utf8'));
     
     const serverConfig = {
       id: serverId,
       name,
-      egg,
-      environment,
-      ports,
-      memory,
+      egg: eggConfig,
+      eggPath,
+      environment: environment || {},
+      ports: ports || [{ internal: 25565, external: 25565 }],
+      memory: parseInt(memory),
+      cpu: parseInt(cpu),
+      disk: parseInt(disk),
       status: 'stopped',
       created: new Date().toISOString()
     };
+    
+    console.log('Server config created:', serverConfig);
     
     // Save server configuration
     const configPath = path.join(SERVER_DATA_PATH, serverId, 'config.json');
     fs.ensureDirSync(path.dirname(configPath));
     fs.writeFileSync(configPath, JSON.stringify(serverConfig, null, 2));
+    
+    console.log('Server config saved to:', configPath);
     
     // Create Docker container
     const container = await createGameServer(serverConfig);
