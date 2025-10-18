@@ -62,58 +62,60 @@ async function scanEggs() {
     return eggs;
   }
   
-  // Dynamically scan all categories
-  const categories = fs.readdirSync(EGGS_PATH, { withFileTypes: true })
-    .filter(dirent => dirent.isDirectory())
-    .map(dirent => dirent.name);
+  console.log('Scanning eggs directory:', EGGS_PATH);
   
-  console.log('Found egg categories:', categories);
-  
-  for (const category of categories) {
-    const categoryPath = path.join(EGGS_PATH, category);
-    if (!fs.existsSync(categoryPath)) continue;
+  // Function to recursively scan for egg files
+  function scanDirectory(dirPath, currentPath = []) {
+    const items = fs.readdirSync(dirPath, { withFileTypes: true });
     
-    eggs[category] = {};
-    
-    const subcategories = fs.readdirSync(categoryPath, { withFileTypes: true })
-      .filter(dirent => dirent.isDirectory())
-      .map(dirent => dirent.name);
-    
-    for (const subcat of subcategories) {
-      const subcatPath = path.join(categoryPath, subcat);
-      eggs[category][subcat] = {};
+    for (const item of items) {
+      const fullPath = path.join(dirPath, item.name);
       
-      const eggFiles = fs.readdirSync(subcatPath)
-        .filter(file => file.endsWith('.json') && file.startsWith('egg-'));
-      
-      for (const eggFile of eggFiles) {
+      if (item.isDirectory()) {
+        // Recursively scan subdirectories
+        scanDirectory(fullPath, [...currentPath, item.name]);
+      } else if (item.name.startsWith('egg-') && item.name.endsWith('.json')) {
+        // Found an egg file
         try {
-          const eggData = JSON.parse(fs.readFileSync(path.join(subcatPath, eggFile), 'utf8'));
-          const eggName = eggFile.replace('egg-', '').replace('.json', '');
-          eggs[category][subcat][eggName] = {
-            name: eggData.name || eggName,
-            description: eggData.description || '',
-            author: eggData.author || '',
-            image: eggData.docker_image || 'node:18-alpine'
-          };
+          const eggData = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+          const eggName = item.name.replace('egg-', '').replace('.json', '');
+          
+          // Create nested structure based on directory path
+          let current = eggs;
+          for (let i = 0; i < currentPath.length; i++) {
+            const pathSegment = currentPath[i];
+            if (!current[pathSegment]) {
+              current[pathSegment] = {};
+            }
+            if (i === currentPath.length - 1) {
+              // Last level - add the egg
+              current[pathSegment][eggName] = {
+                name: eggData.name || eggName,
+                description: eggData.description || '',
+                author: eggData.author || '',
+                image: eggData.docker_image || 'node:18-alpine',
+                category: currentPath.join('/'),
+                fullData: eggData
+              };
+            } else {
+              current = current[pathSegment];
+            }
+          }
+          
+          console.log(`Found egg: ${currentPath.join('/')}/${eggName}`);
         } catch (error) {
-          console.error(`Error parsing egg ${eggFile}:`, error.message);
+          console.error(`Error parsing egg ${fullPath}:`, error.message);
         }
       }
-      
-      // Remove empty subcategories
-      if (Object.keys(eggs[category][subcat]).length === 0) {
-        delete eggs[category][subcat];
-      }
-    }
-    
-    // Remove empty categories
-    if (Object.keys(eggs[category]).length === 0) {
-      delete eggs[category];
     }
   }
   
-  console.log('Scanned eggs structure:', Object.keys(eggs));
+  // Start scanning from the eggs directory
+  scanDirectory(EGGS_PATH);
+  
+  console.log('Total egg categories found:', Object.keys(eggs).length);
+  console.log('Categories:', Object.keys(eggs));
+  
   return eggs;
 }
 
