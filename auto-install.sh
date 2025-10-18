@@ -114,10 +114,10 @@ cp .env.example .env
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || echo "localhost")
 sed -i "s/your-server-ip/${SERVER_IP}/g" .env
 
-echo "🥚 Pterodactyl eggs downloaden..."
+echo "🥚 Pelican eggs downloaden..."
 if [ ! -d "eggs" ] || [ -z "$(ls -A eggs)" ]; then
-    echo "📥 Downloaden van officiële Pterodactyl eggs..."
-    git clone https://github.com/pterodactyl/eggs.git temp-eggs
+    echo "📥 Downloaden van Pelican eggs repository..."
+    git clone https://github.com/pelican-eggs/eggs.git temp-eggs
     cp -r temp-eggs/* eggs/
     rm -rf temp-eggs
     echo "✅ Eggs geïnstalleerd"

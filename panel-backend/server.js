@@ -57,7 +57,17 @@ io.on('connection', (socket) => {
 async function scanEggs() {
   const eggs = {};
   
-  const categories = ['game_eggs', 'generic', 'minecraft'];
+  if (!fs.existsSync(EGGS_PATH)) {
+    console.log('Eggs directory not found:', EGGS_PATH);
+    return eggs;
+  }
+  
+  // Dynamically scan all categories
+  const categories = fs.readdirSync(EGGS_PATH, { withFileTypes: true })
+    .filter(dirent => dirent.isDirectory())
+    .map(dirent => dirent.name);
+  
+  console.log('Found egg categories:', categories);
   
   for (const category of categories) {
     const categoryPath = path.join(EGGS_PATH, category);
@@ -80,14 +90,30 @@ async function scanEggs() {
         try {
           const eggData = JSON.parse(fs.readFileSync(path.join(subcatPath, eggFile), 'utf8'));
           const eggName = eggFile.replace('egg-', '').replace('.json', '');
-          eggs[category][subcat][eggName] = eggData;
+          eggs[category][subcat][eggName] = {
+            name: eggData.name || eggName,
+            description: eggData.description || '',
+            author: eggData.author || '',
+            image: eggData.docker_image || 'node:18-alpine'
+          };
         } catch (error) {
           console.error(`Error parsing egg ${eggFile}:`, error.message);
         }
       }
+      
+      // Remove empty subcategories
+      if (Object.keys(eggs[category][subcat]).length === 0) {
+        delete eggs[category][subcat];
+      }
+    }
+    
+    // Remove empty categories
+    if (Object.keys(eggs[category]).length === 0) {
+      delete eggs[category];
     }
   }
   
+  console.log('Scanned eggs structure:', Object.keys(eggs));
   return eggs;
 }
 
