@@ -335,27 +335,54 @@ app.post('/api/servers', async (req, res) => {
       return res.status(400).json({ error: 'Name and egg are required' });
     }
     
-    const serverId = uuidv4();
-    
-    // Construct egg path for loading
-    const eggPath = `${egg.category}/${egg.subcategory}/${egg.eggName}`;
-    console.log('Loading egg from path:', eggPath);
-    
-    // Load egg configuration
-    const eggFilePath = path.join(EGGS_PATH, egg.category, egg.subcategory, `egg-${egg.eggName}.json`);
-    
-    if (!fs.existsSync(eggFilePath)) {
-      console.error('Egg file not found:', eggFilePath);
-      return res.status(404).json({ error: 'Egg configuration not found' });
+    if (!egg.data || !egg.data.originalPath || !egg.data.eggFile) {
+      console.error('Invalid egg structure:', egg);
+      return res.status(400).json({ error: 'Invalid egg structure provided' });
     }
     
-    const eggConfig = JSON.parse(fs.readFileSync(eggFilePath, 'utf8'));
+    const serverId = uuidv4();
+    
+    // Extract egg path from the selected egg data
+    const eggCategory = egg.category;
+    const eggSubcategory = egg.subcategory || egg.data.subcategory;
+    const eggFileName = egg.data.eggFile;
+    
+    console.log('Egg details:', { eggCategory, eggSubcategory, eggFileName });
+    
+    // Construct egg file path
+    const eggFilePath = path.join(EGGS_PATH, eggCategory.toLowerCase().replace(/[^a-z0-9]/g, '_'), 
+                                  eggSubcategory, `egg-${eggFileName}.json`);
+    
+    console.log('Looking for egg file at:', eggFilePath);
+    
+    // Try different path variations if the file doesn't exist
+    let eggConfig = null;
+    const possiblePaths = [
+      eggFilePath,
+      path.join(EGGS_PATH, egg.data.originalPath, `egg-${eggFileName}.json`),
+      path.join(EGGS_PATH, eggCategory.toLowerCase(), eggSubcategory, `egg-${eggFileName}.json`),
+      path.join(EGGS_PATH, eggCategory.replace(/\s+/g, '_').toLowerCase(), eggSubcategory, `egg-${eggFileName}.json`)
+    ];
+    
+    for (const possiblePath of possiblePaths) {
+      console.log('Trying path:', possiblePath);
+      if (fs.existsSync(possiblePath)) {
+        console.log('Found egg at:', possiblePath);
+        eggConfig = JSON.parse(fs.readFileSync(possiblePath, 'utf8'));
+        break;
+      }
+    }
+    
+    if (!eggConfig) {
+      console.error('Egg file not found in any of these paths:', possiblePaths);
+      return res.status(404).json({ error: 'Egg configuration not found' });
+    }
     
     const serverConfig = {
       id: serverId,
       name,
       egg: eggConfig,
-      eggPath,
+      eggData: egg.data,
       environment: environment || {},
       ports: ports || [{ internal: 25565, external: 25565 }],
       memory: parseInt(memory),
