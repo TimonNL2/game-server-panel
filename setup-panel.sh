@@ -23,14 +23,33 @@ fi
 echo "📥 Panel downloaden..."
 if [ -d "/opt/game-panel" ]; then
     echo "⚠️  /opt/game-panel bestaat al"
-    echo "Verwijderen? (y/N)"
-    read -r REPLY
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        sudo rm -rf /opt/game-panel
+    
+    # Check if it looks like our panel
+    if [ -f "/opt/game-panel/docker-compose.yml" ]; then
+        echo "🔄 Bestaande installatie gevonden, updaten..."
+        cd /opt/game-panel
+        
+        # Stop running containers
+        docker-compose down 2>/dev/null || true
+        
+        # Pull latest changes
+        git pull origin main 2>/dev/null || {
+            echo "⚠️  Git pull mislukt, directory opnieuw maken..."
+            cd /
+            sudo rm -rf /opt/game-panel
+            git clone https://github.com/TimonNL2/game-server-panel.git /opt/game-panel
+            cd /opt/game-panel
+        }
     else
-        echo "Installatie gestopt"
-        exit 1
+        echo "📁 Directory bestaat maar is geen panel installatie"
+        echo "🗑️  Directory verwijderen en opnieuw installeren..."
+        sudo rm -rf /opt/game-panel
+        git clone https://github.com/TimonNL2/game-server-panel.git /opt/game-panel
+        cd /opt/game-panel
     fi
+else
+    git clone https://github.com/TimonNL2/game-server-panel.git /opt/game-panel
+    cd /opt/game-panel
 fi
 
 git clone https://github.com/TimonNL2/game-server-panel.git /opt/game-panel
