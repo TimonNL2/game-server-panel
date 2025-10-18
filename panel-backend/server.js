@@ -25,8 +25,8 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // Paths
-const EGGS_PATH = path.join(__dirname, '..', 'eggs');
-const SERVER_DATA_PATH = path.join(__dirname, '..', 'server-data');
+const EGGS_PATH = process.env.NODE_ENV === 'production' ? '/app/eggs' : path.join(__dirname, '..', 'eggs');
+const SERVER_DATA_PATH = process.env.NODE_ENV === 'production' ? '/app/server-data' : path.join(__dirname, '..', 'server-data');
 const DOCKER_CONFIGS_PATH = path.join(__dirname, '..', 'docker-configs');
 
 // Ensure directories exist
