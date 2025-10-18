@@ -117,13 +117,14 @@ sed -i "s/your-server-ip/${SERVER_IP}/g" .env
 echo "🐳 Panel starten..."
 # Use docker compose (plugin) or docker-compose (standalone)
 if docker compose version &> /dev/null; then
-    DOCKER_COMPOSE="docker compose"
+    echo "📋 Gebruik docker compose (plugin)"
+    docker compose pull
+    docker compose up -d
 else
-    DOCKER_COMPOSE="docker-compose"
+    echo "📋 Gebruik docker-compose (standalone)"
+    docker-compose pull
+    docker-compose up -d
 fi
-
-$DOCKER_COMPOSE pull
-$DOCKER_COMPOSE up -d
 
 # Wait a moment for containers to start
 echo "⏳ Wachten op containers..."
@@ -133,7 +134,11 @@ echo ""
 echo "🎉 Panel installatie voltooid!"
 echo ""
 echo "📊 Container status:"
-$DOCKER_COMPOSE ps
+if docker compose version &> /dev/null; then
+    docker compose ps
+else
+    docker-compose ps
+fi
 
 echo ""
 echo "🌐 Panel openen:"
@@ -141,14 +146,25 @@ echo "   Frontend: http://${SERVER_IP}:3000"
 echo "   Backend:  http://${SERVER_IP}:3001/api/health"
 echo ""
 echo "🛠️  Handige commando's:"
-echo "   Logs bekijken:     $DOCKER_COMPOSE logs -f"
-echo "   Panel herstarten:  $DOCKER_COMPOSE restart"
-echo "   Panel stoppen:     $DOCKER_COMPOSE down"
-echo "   Panel updaten:     git pull && $DOCKER_COMPOSE up -d --build"
+if docker compose version &> /dev/null; then
+    echo "   Logs bekijken:     docker compose logs -f"
+    echo "   Panel herstarten:  docker compose restart"
+    echo "   Panel stoppen:     docker compose down"
+    echo "   Panel updaten:     git pull && docker compose up -d --build"
+else
+    echo "   Logs bekijken:     docker-compose logs -f"
+    echo "   Panel herstarten:  docker-compose restart"
+    echo "   Panel stoppen:     docker-compose down"
+    echo "   Panel updaten:     git pull && docker-compose up -d --build"
+fi
 echo ""
 echo "📝 Environment aanpassen:"
 echo "   nano /opt/game-panel/.env"
-echo "   $DOCKER_COMPOSE restart"
+if docker compose version &> /dev/null; then
+    echo "   docker compose restart"
+else
+    echo "   docker-compose restart"
+fi
 echo ""
 echo "🎮 Je kunt nu servers maken via de web interface!"
 

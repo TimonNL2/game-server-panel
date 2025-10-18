@@ -6,13 +6,6 @@ set -e
 echo "🚀 Game Server Panel - Panel Setup"
 echo "=================================="
 
-# Determine Docker Compose command
-if docker compose version &> /dev/null; then
-    DOCKER_COMPOSE="docker compose"
-else
-    DOCKER_COMPOSE="docker-compose"
-fi
-
 # Check if Docker is working
 if ! docker --version &> /dev/null; then
     echo "❌ Docker is niet beschikbaar!"
@@ -78,7 +71,13 @@ else
 fi
 
 $DOCKER_COMPOSE pull
-$DOCKER_COMPOSE up -d
+# Start the panel
+echo "📦 Starting Game Server Panel..."
+if docker compose version &> /dev/null; then
+    docker compose up -d
+else
+    docker-compose up -d
+fi
 
 echo ""
 echo "🎉 Panel is gestart!"
