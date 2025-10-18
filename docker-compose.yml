@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  game-panel-backend:
+    build:
+      context: ./panel-backend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./server-data:/app/server-data
+      - ./eggs:/app/eggs
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    restart: unless-stopped
+    depends_on:
+      - redis
+    networks:
+      - game-panel-network
+
+  game-panel-frontend:
+    build:
+      context: ./panel-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    networks:
+      - game-panel-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - game-panel-network
+
+networks:
+  game-panel-network:
+    driver: bridge
+
+volumes:
+  redis_data:
