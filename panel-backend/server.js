@@ -343,15 +343,13 @@ app.post('/api/servers', async (req, res) => {
     const serverId = uuidv4();
     
     // Extract egg path from the selected egg data
-    const eggCategory = egg.category;
-    const eggSubcategory = egg.subcategory || egg.data.subcategory;
+    const eggOriginalPath = egg.data.originalPath;
     const eggFileName = egg.data.eggFile;
     
-    console.log('Egg details:', { eggCategory, eggSubcategory, eggFileName });
+    console.log('Egg details:', { eggOriginalPath, eggFileName });
     
-    // Construct egg file path
-    const eggFilePath = path.join(EGGS_PATH, eggCategory.toLowerCase().replace(/[^a-z0-9]/g, '_'), 
-                                  eggSubcategory, `egg-${eggFileName}.json`);
+    // Construct egg file path using original path structure
+    const eggFilePath = path.join(EGGS_PATH, eggOriginalPath, `egg-${eggFileName}.json`);
     
     console.log('Looking for egg file at:', eggFilePath);
     
@@ -359,9 +357,10 @@ app.post('/api/servers', async (req, res) => {
     let eggConfig = null;
     const possiblePaths = [
       eggFilePath,
-      path.join(EGGS_PATH, egg.data.originalPath, `egg-${eggFileName}.json`),
-      path.join(EGGS_PATH, eggCategory.toLowerCase(), eggSubcategory, `egg-${eggFileName}.json`),
-      path.join(EGGS_PATH, eggCategory.replace(/\s+/g, '_').toLowerCase(), eggSubcategory, `egg-${eggFileName}.json`)
+      path.join(EGGS_PATH, eggOriginalPath.replace(/_/g, '/'), `egg-${eggFileName}.json`),
+      path.join(EGGS_PATH, egg.category.toLowerCase().replace(/[^a-z0-9]/g, '_'), 
+                egg.subcategory, `egg-${eggFileName}.json`),
+      path.join(EGGS_PATH, egg.category.toLowerCase(), egg.subcategory, `egg-${eggFileName}.json`)
     ];
     
     for (const possiblePath of possiblePaths) {
