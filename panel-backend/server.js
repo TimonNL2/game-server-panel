@@ -64,6 +64,72 @@ async function scanEggs() {
   
   console.log('Scanning eggs directory:', EGGS_PATH);
   
+  // Function to clean egg names (remove dots, underscores, etc.)
+  function cleanName(name) {
+    return name
+      .replace(/[_-]/g, ' ')
+      .replace(/\./g, ' ')
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ')
+      .trim();
+  }
+  
+  // Function to categorize games logically
+  function categorizeGame(path, eggName, eggData) {
+    const pathLower = path.join('/').toLowerCase();
+    const nameLower = eggName.toLowerCase();
+    const fullName = (eggData.name || eggName).toLowerCase();
+    
+    // Minecraft games
+    if (pathLower.includes('minecraft') || nameLower.includes('minecraft') || fullName.includes('minecraft')) {
+      return 'Minecraft';
+    }
+    
+    // GTA games
+    if (nameLower.includes('gta') || nameLower.includes('fivem') || nameLower.includes('altv') || fullName.includes('gta')) {
+      return 'GTA / Racing';
+    }
+    
+    // Survival games
+    if (nameLower.includes('ark') || nameLower.includes('rust') || nameLower.includes('7days') || 
+        nameLower.includes('dayz') || nameLower.includes('valheim') || nameLower.includes('subnautica')) {
+      return 'Survival Games';
+    }
+    
+    // FPS / Shooter games
+    if (nameLower.includes('counter') || nameLower.includes('cs2') || nameLower.includes('csgo') || 
+        nameLower.includes('call of duty') || nameLower.includes('battlefield')) {
+      return 'FPS / Shooter';
+    }
+    
+    // MMO / RPG games
+    if (nameLower.includes('wow') || nameLower.includes('ffxiv') || nameLower.includes('elderscrolls') ||
+        nameLower.includes('tera') || pathLower.includes('mmorpg')) {
+      return 'MMO / RPG';
+    }
+    
+    // Bots & Tools
+    if (pathLower.includes('bots') || pathLower.includes('bot') || nameLower.includes('bot')) {
+      return 'Bots & Tools';
+    }
+    
+    // Databases
+    if (pathLower.includes('database') || nameLower.includes('mysql') || nameLower.includes('postgres') ||
+        nameLower.includes('redis') || nameLower.includes('mongodb')) {
+      return 'Databases';
+    }
+    
+    // Voice servers
+    if (pathLower.includes('voice') || nameLower.includes('teamspeak') || nameLower.includes('mumble') ||
+        nameLower.includes('discord')) {
+      return 'Voice Servers';
+    }
+    
+    // Generic/Other category as fallback
+    return 'Other Games';
+  }
+  
   // Function to recursively scan for egg files
   function scanDirectory(dirPath, currentPath = []) {
     const items = fs.readdirSync(dirPath, { withFileTypes: true });
@@ -72,37 +138,58 @@ async function scanEggs() {
       const fullPath = path.join(dirPath, item.name);
       
       if (item.isDirectory()) {
-        // Recursively scan subdirectories
-        scanDirectory(fullPath, [...currentPath, item.name]);
+        // Skip hidden directories and non-game directories
+        if (!item.name.startsWith('.') && !item.name.includes('example')) {
+          scanDirectory(fullPath, [...currentPath, item.name]);
+        }
       } else if (item.name.startsWith('egg-') && item.name.endsWith('.json')) {
         // Found an egg file
         try {
           const eggData = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
-          const eggName = item.name.replace('egg-', '').replace('.json', '');
           
-          // Create nested structure based on directory path
-          let current = eggs;
-          for (let i = 0; i < currentPath.length; i++) {
-            const pathSegment = currentPath[i];
-            if (!current[pathSegment]) {
-              current[pathSegment] = {};
-            }
-            if (i === currentPath.length - 1) {
-              // Last level - add the egg
-              current[pathSegment][eggName] = {
-                name: eggData.name || eggName,
-                description: eggData.description || '',
-                author: eggData.author || '',
-                image: eggData.docker_image || 'node:18-alpine',
-                category: currentPath.join('/'),
-                fullData: eggData
-              };
-            } else {
-              current = current[pathSegment];
-            }
+          // Skip if no proper name or description
+          if (!eggData.name || eggData.name.trim() === '') {
+            console.log(`Skipping egg without name: ${fullPath}`);
+            continue;
           }
           
-          console.log(`Found egg: ${currentPath.join('/')}/${eggName}`);
+          const originalEggName = item.name.replace('egg-', '').replace('.json', '');
+          const cleanEggName = cleanName(originalEggName);
+          const displayName = cleanName(eggData.name || originalEggName);
+          
+          // Categorize the game
+          const category = categorizeGame(currentPath, originalEggName, eggData);
+          
+          // Initialize category if not exists
+          if (!eggs[category]) {
+            eggs[category] = {};
+          }
+          
+          // Create unique identifier
+          const uniqueId = `${currentPath.join('_')}_${originalEggName}`;
+          
+          eggs[category][uniqueId] = {
+            id: uniqueId,
+            name: displayName,
+            originalName: eggData.name,
+            description: eggData.description || 'No description available',
+            author: eggData.author || 'Unknown',
+            image: eggData.docker_image || 'node:18-alpine',
+            category: category,
+            subcategory: currentPath[currentPath.length - 1] || 'general',
+            originalPath: currentPath.join('/'),
+            eggFile: originalEggName,
+            variables: eggData.variables || [],
+            startup: eggData.startup || '',
+            config: {
+              files: eggData.config?.files || {},
+              startup: eggData.config?.startup || {},
+              logs: eggData.config?.logs || {},
+              stop: eggData.config?.stop || 'stop'
+            }
+          };
+          
+          console.log(`Found egg: ${category} -> ${displayName}`);
         } catch (error) {
           console.error(`Error parsing egg ${fullPath}:`, error.message);
         }
@@ -113,10 +200,46 @@ async function scanEggs() {
   // Start scanning from the eggs directory
   scanDirectory(EGGS_PATH);
   
-  console.log('Total egg categories found:', Object.keys(eggs).length);
-  console.log('Categories:', Object.keys(eggs));
+  // Sort categories and eggs within categories
+  const sortedEggs = {};
+  const categoryOrder = [
+    'Minecraft',
+    'GTA / Racing', 
+    'Survival Games',
+    'FPS / Shooter',
+    'MMO / RPG',
+    'Other Games',
+    'Bots & Tools',
+    'Databases',
+    'Voice Servers'
+  ];
   
-  return eggs;
+  // Add categories in order
+  for (const category of categoryOrder) {
+    if (eggs[category] && Object.keys(eggs[category]).length > 0) {
+      sortedEggs[category] = {};
+      
+      // Sort eggs within category by name
+      const sortedKeys = Object.keys(eggs[category]).sort((a, b) => 
+        eggs[category][a].name.localeCompare(eggs[category][b].name)
+      );
+      
+      for (const key of sortedKeys) {
+        sortedEggs[category][key] = eggs[category][key];
+      }
+    }
+  }
+  
+  console.log('Total egg categories found:', Object.keys(sortedEggs).length);
+  console.log('Categories:', Object.keys(sortedEggs));
+  
+  // Count total eggs
+  const totalEggs = Object.values(sortedEggs).reduce((sum, category) => 
+    sum + Object.keys(category).length, 0
+  );
+  console.log('Total eggs found:', totalEggs);
+  
+  return sortedEggs;
 }
 
 // Helper function to create Docker container
