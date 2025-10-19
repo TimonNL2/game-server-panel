@@ -63,10 +63,13 @@ function ServerDetail() {
   const handleServerLog = (data) => {
     console.log('Received server log:', data); // Debug logging
     if (data.serverId === id) {
-      setLogs(prev => [...prev, {
+      // Split multi-line logs into separate entries
+      const logLines = data.log.split('\n').filter(line => line.trim());
+      const newLogs = logLines.map(line => ({
         timestamp: new Date(data.timestamp || new Date()),
-        message: data.log.replace(/\x1b\[[0-9;]*m/g, '') // Remove ANSI codes
-      }]);
+        message: line.replace(/\x1b\[[0-9;]*m/g, '') // Remove ANSI codes
+      }));
+      setLogs(prev => [...prev, ...newLogs]);
     }
   };
 
@@ -258,8 +261,8 @@ function ServerDetail() {
             logsEndRef={logsEndRef}
           />
         )}
-        {activeTab === 'files' && <FileManager />}
-        {activeTab === 'settings' && <ServerSettings />}
+        {activeTab === 'files' && <FileManager serverId={id} />}
+        {activeTab === 'settings' && <ServerSettings serverId={id} server={server} />}
       </div>
     </div>
   );
