@@ -16,18 +16,29 @@ export const SocketProvider = ({ children }) => {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const newSocket = io('http://localhost:3001', {
-      transports: ['websocket']
+    // Use window.location to connect to backend on same host
+    const backendUrl = window.location.hostname === 'localhost' 
+      ? 'http://localhost:3001'
+      : `http://${window.location.hostname}:3001`;
+    
+    console.log('Connecting to WebSocket:', backendUrl);
+    
+    const newSocket = io(backendUrl, {
+      transports: ['websocket', 'polling']
     });
 
     newSocket.on('connect', () => {
-      console.log('Connected to server');
+      console.log('✅ Connected to WebSocket server');
       setConnected(true);
     });
 
     newSocket.on('disconnect', () => {
-      console.log('Disconnected from server');
+      console.log('❌ Disconnected from WebSocket server');
       setConnected(false);
+    });
+    
+    newSocket.on('connect_error', (error) => {
+      console.error('WebSocket connection error:', error);
     });
 
     setSocket(newSocket);

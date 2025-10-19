@@ -86,7 +86,7 @@ function ServerDetail() {
   };
 
   const handleServerLog = (data) => {
-    console.log('Received server log:', data); // Debug logging
+    console.log('📥 Received server log:', data); // Debug logging
     if (data.serverId === id) {
       // Split multi-line logs into separate entries
       const logLines = data.log.split('\n').filter(line => line.trim());
@@ -94,7 +94,10 @@ function ServerDetail() {
         timestamp: new Date(data.timestamp || new Date()),
         message: line.replace(/\x1b\[[0-9;]*m/g, '') // Remove ANSI codes
       }));
+      console.log(`✅ Adding ${newLogs.length} log entries`);
       setLogs(prev => [...prev, ...newLogs]);
+    } else {
+      console.log('⚠️ Log from different server:', data.serverId, 'expected:', id);
     }
   };
 
@@ -328,9 +331,20 @@ function ServerDetail() {
 function ConsoleTab({ logs, command, setCommand, onSendCommand, serverStatus, logsEndRef }) {
   return (
     <div className="space-y-4">
+      {/* Debug Info */}
+      <div className="bg-gray-800 rounded p-2 text-xs text-gray-400">
+        Status: {serverStatus} | Logs: {logs.length} | WebSocket: {window.socketConnected ? '✅' : '❌'}
+      </div>
+      
       <div className="bg-black rounded-lg p-4 h-96 overflow-y-auto font-mono text-sm">
         {logs.length === 0 ? (
-          <p className="text-gray-400">Geen logs beschikbaar. Start de server om logs te zien.</p>
+          <div>
+            <p className="text-gray-400">⏳ Wachten op logs...</p>
+            <p className="text-gray-500 text-xs mt-2">
+              Server status: {serverStatus}<br/>
+              Check de browser console (F12) voor debug info
+            </p>
+          </div>
         ) : (
           logs.map((log, index) => (
             <div key={index} className="mb-1">

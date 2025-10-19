@@ -616,60 +616,32 @@ async function createGameServer(serverConfig) {
   
   console.log(`Using startup command: ${processedStartupCommand}`);
   
-  // Create smart startup script that won't crash
-  const startupScript = `#!/bin/bash
-set -e
-cd /home/container
-
-echo "=== Game Server Starting ==="
-echo "Server ID: ${id}"
-echo "Working Directory: $(pwd)"
-
-# Auto-accept EULA for Minecraft servers
-${isMinecraft ? `
-if [ ! -f eula.txt ]; then
-  echo "Creating eula.txt..."
-  echo "eula=true" > eula.txt
-  echo "✓ EULA accepted automatically"
-elif grep -q "eula=false" eula.txt 2>/dev/null; then
-  echo "Updating eula.txt to accept EULA..."
-  sed -i 's/eula=false/eula=true/g' eula.txt
-  echo "✓ EULA accepted automatically"
-else
-  echo "✓ EULA already accepted"
-fi
-` : '# Not a Minecraft server, no EULA needed'}
-
-# Check for server jar
-if [ -f fabric-server-launch.jar ]; then
-  JAR_FILE="fabric-server-launch.jar"
-  echo "✓ Found fabric-server-launch.jar"
-elif [ -f server.jar ]; then
-  JAR_FILE="server.jar"
-  echo "✓ Found server.jar"
-else
-  echo "⚠ No server jar found yet (might be first start)"
-  JAR_FILE="server.jar"
-fi
-
-# Execute startup command
-echo "Starting server with command: ${processedStartupCommand}"
-echo "========================================"
-exec ${processedStartupCommand}
-`;
+  // Build inline bash command (no separate script file needed)
+  const eulaHandling = isMinecraft ? `
+    if [ ! -f eula.txt ]; then
+      echo "eula=true" > eula.txt
+      echo "✓ EULA created"
+    elif grep -q "eula=false" eula.txt 2>/dev/null; then
+      sed -i 's/eula=false/eula=true/g' eula.txt
+      echo "✓ EULA accepted"
+    fi
+  ` : '';
   
-  // Write startup script to server directory
-  const startScriptPath = path.join(serverDir, 'start.sh');
-  fs.writeFileSync(startScriptPath, startupScript);
-  fs.chmodSync(startScriptPath, 0o755);
-  console.log(`Created startup script at ${startScriptPath}`);
+  const inlineCommand = `
+    cd /home/container || exit 1
+    echo "=== Server Starting ==="
+    ls -la
+    ${eulaHandling}
+    echo "Running: ${processedStartupCommand}"
+    ${processedStartupCommand}
+  `.trim();
   
-  // Configure container with simple command that runs our script
+  // Configure container with inline command
   const containerConfig = {
     name: `game_server_${id}`,
     Image: dockerImage,
     Env: envVars,
-    Cmd: ['/bin/bash', '/home/container/start.sh'],
+    Cmd: ['/bin/bash', '-c', inlineCommand],
     HostConfig: {
       PortBindings: portBindings,
       Memory: memory * 1024 * 1024, // Convert MB to bytes
