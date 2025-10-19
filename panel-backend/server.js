@@ -255,6 +255,7 @@ async function scanEggs() {
 async function preloadBaseImages() {
   const baseImages = [
     'node:18-alpine',
+    'eclipse-temurin:21-jre',
     'eclipse-temurin:17-jre',
     'eclipse-temurin:11-jre',
     'eclipse-temurin:8-jre',
@@ -355,9 +356,9 @@ async function runServerInstallation(serverConfig, eggData) {
     
     // Map Pterodactyl installation images to available ones
     const installImageMap = {
+      'openjdk:8-jdk-slim': 'eclipse-temurin:8-jdk',
       'openjdk:11-jdk-slim': 'eclipse-temurin:11-jdk',
       'openjdk:17-jdk-slim': 'eclipse-temurin:17-jdk',
-      'openjdk:8-jdk-slim': 'eclipse-temurin:8-jdk',
       'openjdk:18-jdk-slim': 'eclipse-temurin:18-jdk',
       'openjdk:21-jdk-slim': 'eclipse-temurin:21-jdk'
     };
@@ -507,6 +508,19 @@ async function createGameServer(serverConfig) {
         'ghcr.io/pterodactyl/yolks:steamcmd': 'steamcmd/steamcmd:latest'
       };
       
+      // For Minecraft servers, try to use Java 21 by default for modern versions
+      if (egg.name && egg.name.toLowerCase().includes('fabric') || 
+          egg.name && egg.name.toLowerCase().includes('forge') ||
+          egg.name && egg.name.toLowerCase().includes('paper') ||
+          egg.name && egg.name.toLowerCase().includes('purpur')) {
+        // Check if Java 21 is in the available images
+        const hasJava21 = Object.values(egg.docker_images || {}).some(img => img.includes('java_21'));
+        if (hasJava21) {
+          dockerImage = 'eclipse-temurin:21-jre';
+          originalImage = 'ghcr.io/pterodactyl/yolks:java_21';
+        }
+      }
+      
       // Check if we have a mapping for this image
       if (imageMap[preferredImage]) {
         dockerImage = imageMap[preferredImage];
@@ -529,12 +543,10 @@ async function createGameServer(serverConfig) {
     // Try alternative Java images if it was a Java image
     if (originalImage && originalImage.includes('java')) {
       const javaFallbacks = [
+        'eclipse-temurin:21-jre',  // Try Java 21 first for modern Minecraft
         'eclipse-temurin:17-jre',
         'eclipse-temurin:11-jre', 
-        'eclipse-temurin:8-jre',
-        'openjdk:17-jre',
-        'openjdk:11-jre',
-        'openjdk:8-jre'
+        'eclipse-temurin:8-jre'
       ];
       
       for (const fallback of javaFallbacks) {
