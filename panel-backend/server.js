@@ -584,6 +584,17 @@ async function createGameServer(serverConfig) {
   // Add server memory
   envVars.push(`SERVER_MEMORY=${memory}`);
   
+  // Create smart startup script that handles EULA and restarts
+  const startupScriptPath = path.join(serverDir, 'start.sh');
+  const isMinecraft = (egg.name && (
+    egg.name.toLowerCase().includes('minecraft') ||
+    egg.name.toLowerCase().includes('fabric') ||
+    egg.name.toLowerCase().includes('forge') ||
+    egg.name.toLowerCase().includes('paper') ||
+    egg.name.toLowerCase().includes('spigot') ||
+    egg.name.toLowerCase().includes('purpur')
+  ));
+  
   // Process startup command - replace variables
   let processedStartupCommand = startupCommand || '';
   if (processedStartupCommand) {
@@ -599,45 +610,74 @@ async function createGameServer(serverConfig) {
     
     // For Fabric servers, use fabric-server-launch.jar if it exists
     if (eggData && eggData.name && eggData.name.toLowerCase().includes('fabric')) {
-      processedStartupCommand = `
-if [ -f fabric-server-launch.jar ]; then
-  echo "Starting Fabric server with fabric-server-launch.jar"
-  ${processedStartupCommand.replace(/server\.jar|{{SERVER_JARFILE}}/g, 'fabric-server-launch.jar')}
-elif [ -f server.jar ]; then
-  echo "Starting server with server.jar"
-  ${processedStartupCommand}
-else
-  echo "No server jar found!"
-  exit 1
-fi
-      `.trim();
+      processedStartupCommand = processedStartupCommand.replace(/server\.jar|{{SERVER_JARFILE}}/g, 'fabric-server-launch.jar');
     }
   }
   
   console.log(`Using startup command: ${processedStartupCommand}`);
   
-  // Configure container with startup command
+  // Create smart startup script that won't crash
+  const startupScript = `#!/bin/bash
+set -e
+cd /home/container
+
+echo "=== Game Server Starting ==="
+echo "Server ID: ${id}"
+echo "Working Directory: $(pwd)"
+
+# Auto-accept EULA for Minecraft servers
+${isMinecraft ? `
+if [ ! -f eula.txt ]; then
+  echo "Creating eula.txt..."
+  echo "eula=true" > eula.txt
+  echo "✓ EULA accepted automatically"
+elif grep -q "eula=false" eula.txt 2>/dev/null; then
+  echo "Updating eula.txt to accept EULA..."
+  sed -i 's/eula=false/eula=true/g' eula.txt
+  echo "✓ EULA accepted automatically"
+else
+  echo "✓ EULA already accepted"
+fi
+` : '# Not a Minecraft server, no EULA needed'}
+
+# Check for server jar
+if [ -f fabric-server-launch.jar ]; then
+  JAR_FILE="fabric-server-launch.jar"
+  echo "✓ Found fabric-server-launch.jar"
+elif [ -f server.jar ]; then
+  JAR_FILE="server.jar"
+  echo "✓ Found server.jar"
+else
+  echo "⚠ No server jar found yet (might be first start)"
+  JAR_FILE="server.jar"
+fi
+
+# Execute startup command
+echo "Starting server with command: ${processedStartupCommand}"
+echo "========================================"
+exec ${processedStartupCommand}
+`;
+  
+  // Write startup script to server directory
+  const startScriptPath = path.join(serverDir, 'start.sh');
+  fs.writeFileSync(startScriptPath, startupScript);
+  fs.chmodSync(startScriptPath, 0o755);
+  console.log(`Created startup script at ${startScriptPath}`);
+  
+  // Configure container with simple command that runs our script
   const containerConfig = {
     name: `game_server_${id}`,
     Image: dockerImage,
     Env: envVars,
-    Cmd: processedStartupCommand ? ['/bin/sh', '-c', `
-      # Fix permissions first
-      chown -R 1000:1000 /home/container 2>/dev/null || true
-      chmod -R 755 /home/container 2>/dev/null || true
-      
-      # Switch to container user and run startup command
-      su -s /bin/sh -c '${processedStartupCommand.replace(/'/g, "'\\''")}' container || ${processedStartupCommand}
-    `] : undefined,
+    Cmd: ['/bin/bash', '/home/container/start.sh'],
     HostConfig: {
       PortBindings: portBindings,
       Memory: memory * 1024 * 1024, // Convert MB to bytes
       Binds: [`${serverDir}:/home/container`],
-      RestartPolicy: { Name: 'unless-stopped' }
+      RestartPolicy: { Name: 'no' } // Don't auto-restart on crashes - manual control only
     },
     ExposedPorts: exposedPorts,
     WorkingDir: '/home/container',
-    User: '0:0', // Start as root to fix permissions, then switch to container user
     Tty: true,
     OpenStdin: true
   };
@@ -871,47 +911,25 @@ app.post('/api/servers/:id/start', async (req, res) => {
     const { id } = req.params;
     console.log(`Starting server ${id}...`);
     
-    // Check for EULA requirement and auto-accept
     const serverDir = path.join(SERVER_DATA_PATH, id);
-    const eulaPath = path.join(serverDir, 'eula.txt');
-    
-    // For Minecraft servers, check if EULA needs to be accepted
-    const configPath = path.join(serverDir, 'config.json');
-    if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      const eggName = config.egg?.name?.toLowerCase() || '';
-      
-      // Check if this is a game that requires EULA acceptance
-      const requiresEula = eggName.includes('minecraft') || 
-                          eggName.includes('java') ||
-                          config.egg?.features?.includes('eula');
-      
-      if (requiresEula) {
-        // Check if eula.txt exists and is not accepted
-        if (!fs.existsSync(eulaPath)) {
-          console.log(`Creating EULA file for server ${id}`);
-          fs.writeFileSync(eulaPath, 'eula=true\n');
-        } else {
-          const eulaContent = fs.readFileSync(eulaPath, 'utf8');
-          if (!eulaContent.includes('eula=true')) {
-            console.log(`Accepting EULA for server ${id}`);
-            fs.writeFileSync(eulaPath, eulaContent.replace(/eula=false/g, 'eula=true'));
-          }
-        }
-      }
-    }
-    
     const container = docker.getContainer(`game_server_${id}`);
     
     // Check if container exists
     try {
-      await container.inspect();
-      console.log(`Container game_server_${id} exists`);
+      const info = await container.inspect();
+      console.log(`Container game_server_${id} exists (State: ${info.State.Status})`);
+      
+      // If already running, just return success
+      if (info.State.Running) {
+        console.log(`Container game_server_${id} is already running`);
+        return res.json({ success: true, message: 'Server already running' });
+      }
     } catch (error) {
       console.error(`Container game_server_${id} does not exist:`, error.message);
-      return res.status(404).json({ error: 'Container not found' });
+      return res.status(404).json({ error: 'Container not found - recreate the server' });
     }
     
+    // Start the container (EULA is handled by start.sh script)
     await container.start();
     console.log(`Container game_server_${id} started successfully`);
     
@@ -1086,25 +1104,94 @@ app.delete('/api/servers/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Stop and remove container
+    // Stop log streaming
+    if (global.serverLogIntervals && global.serverLogIntervals.has(id)) {
+      clearInterval(global.serverLogIntervals.get(id));
+      global.serverLogIntervals.delete(id);
+      console.log(`Stopped log streaming for deleted server ${id}`);
+    }
+    
+    // Stop and remove container with force
     try {
       const container = docker.getContainer(`game_server_${id}`);
-      await container.stop();
-      await container.remove();
+      try {
+        await container.stop({ t: 10 });
+        console.log(`Stopped container game_server_${id}`);
+      } catch (stopErr) {
+        console.log('Container already stopped or not running');
+      }
+      await container.remove({ force: true });
+      console.log(`Removed container game_server_${id}`);
     } catch (error) {
-      console.log('Container not found or already removed');
+      console.log('Container not found or already removed:', error.message);
     }
     
     // Remove server data
     const serverDir = path.join(SERVER_DATA_PATH, id);
     if (fs.existsSync(serverDir)) {
       fs.removeSync(serverDir);
+      console.log(`Removed server directory: ${serverDir}`);
     }
     
     runningServers.delete(id);
     
-    res.json({ message: 'Server deleted' });
+    res.json({ message: 'Server deleted successfully' });
   } catch (error) {
+    console.error('Error deleting server:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Force recreate container (for stuck/broken containers)
+app.post('/api/servers/:id/recreate', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`Recreating container for server ${id}...`);
+    
+    const serverDir = path.join(SERVER_DATA_PATH, id);
+    const configPath = path.join(serverDir, 'config.json');
+    
+    if (!fs.existsSync(configPath)) {
+      return res.status(404).json({ error: 'Server config not found' });
+    }
+    
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    
+    // Stop log streaming
+    if (global.serverLogIntervals && global.serverLogIntervals.has(id)) {
+      clearInterval(global.serverLogIntervals.get(id));
+      global.serverLogIntervals.delete(id);
+    }
+    
+    // Force remove old container
+    try {
+      const oldContainer = docker.getContainer(`game_server_${id}`);
+      try {
+        await oldContainer.stop({ t: 5 });
+      } catch (e) { /* ignore */ }
+      await oldContainer.remove({ force: true });
+      console.log(`Removed old container game_server_${id}`);
+    } catch (error) {
+      console.log('No old container to remove');
+    }
+    
+    // Recreate container using same config
+    const container = await createGameServer(
+      id,
+      config.name,
+      config.egg,
+      config.environment,
+      config.ports,
+      config.limits.memory,
+      config.limits.cpu,
+      config.limits.disk,
+      config.startupCommand
+    );
+    
+    console.log(`Successfully recreated container for server ${id}`);
+    res.json({ success: true, message: 'Container recreated successfully' });
+  } catch (error) {
+    console.error('Error recreating container:', error);
     res.status(500).json({ error: error.message });
   }
 });
