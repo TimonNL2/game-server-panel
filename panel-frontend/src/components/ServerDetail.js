@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { useSocket } from '../contexts/SocketContext';
+import FileManager from './FileManager';
+import ServerSettings from './ServerSettings';
 import {
   PlayIcon,
   StopIcon,
@@ -10,7 +12,8 @@ import {
   TrashIcon,
   CommandLineIcon,
   DocumentTextIcon,
-  CogIcon
+  CogIcon,
+  FolderIcon
 } from '@heroicons/react/24/outline';
 
 function ServerDetail() {
@@ -136,7 +139,7 @@ function ServerDetail() {
 
   const tabs = [
     { id: 'console', name: 'Console', icon: CommandLineIcon },
-    { id: 'files', name: 'Bestanden', icon: DocumentTextIcon },
+    { id: 'files', name: 'Bestanden', icon: FolderIcon },
     { id: 'settings', name: 'Instellingen', icon: CogIcon }
   ];
 
@@ -255,8 +258,8 @@ function ServerDetail() {
             logsEndRef={logsEndRef}
           />
         )}
-        {activeTab === 'files' && <FilesTab serverId={id} />}
-        {activeTab === 'settings' && <SettingsTab server={server} onUpdate={fetchServer} />}
+        {activeTab === 'files' && <FileManager />}
+        {activeTab === 'settings' && <ServerSettings />}
       </div>
     </div>
   );

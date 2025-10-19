@@ -335,6 +335,113 @@ async function pullDockerImage(imageName) {
   }
 }
 
+// Helper function to run server installation
+async function runServerInstallation(serverConfig, eggData) {
+  try {
+    console.log(`Running installation for server ${serverConfig.name}...`);
+    
+    // Check if the egg has an installation script
+    if (!eggData.scripts || !eggData.scripts.installation) {
+      console.log('No installation script found, skipping installation phase');
+      return true;
+    }
+    
+    const installScript = eggData.scripts.installation;
+    const serverDir = path.join(SERVER_DATA_PATH, serverConfig.id);
+    fs.ensureDirSync(serverDir);
+    
+    // Get installation container image
+    let installImage = installScript.container || 'openjdk:11-jdk-slim';
+    
+    // Map Pterodactyl installation images to available ones
+    const installImageMap = {
+      'openjdk:11-jdk-slim': 'eclipse-temurin:11-jdk',
+      'openjdk:17-jdk-slim': 'eclipse-temurin:17-jdk',
+      'openjdk:8-jdk-slim': 'eclipse-temurin:8-jdk',
+      'openjdk:18-jdk-slim': 'eclipse-temurin:18-jdk',
+      'openjdk:21-jdk-slim': 'eclipse-temurin:21-jdk'
+    };
+    
+    if (installImageMap[installImage]) {
+      installImage = installImageMap[installImage];
+    }
+    
+    console.log(`Using installation image: ${installImage}`);
+    
+    // Pull installation image if needed
+    try {
+      await docker.getImage(installImage).inspect();
+      console.log(`Installation image ${installImage} already exists locally`);
+    } catch (error) {
+      if (error.statusCode === 404) {
+        console.log(`Pulling installation image: ${installImage}...`);
+        await pullDockerImage(installImage);
+      }
+    }
+    
+    // Prepare environment variables for installation
+    const installEnv = [];
+    if (serverConfig.environment) {
+      Object.entries(serverConfig.environment).forEach(([key, value]) => {
+        installEnv.push(`${key}=${value}`);
+      });
+    }
+    
+    // Add server memory as environment variable
+    installEnv.push(`SERVER_MEMORY=${serverConfig.memory || 1024}`);
+    
+    // Create installation container
+    const installContainerConfig = {
+      name: `install_${serverConfig.id}`,
+      Image: installImage,
+      Cmd: [installScript.entrypoint || 'bash', '-c', installScript.script],
+      Env: installEnv,
+      HostConfig: {
+        Binds: [`${serverDir}:/mnt/server`],
+        Memory: 2 * 1024 * 1024 * 1024, // 2GB for installation
+        AutoRemove: true
+      },
+      WorkingDir: '/mnt/server'
+    };
+    
+    console.log(`Creating installation container for server ${serverConfig.name}...`);
+    const installContainer = await docker.createContainer(installContainerConfig);
+    
+    console.log(`Starting installation process for server ${serverConfig.name}...`);
+    await installContainer.start();
+    
+    // Wait for installation to complete and get logs
+    const installResult = await installContainer.wait();
+    
+    if (installResult.StatusCode === 0) {
+      console.log(`✓ Installation completed successfully for server ${serverConfig.name}`);
+      
+      // Create basic server files if they don't exist
+      const eula = path.join(serverDir, 'eula.txt');
+      if (!fs.existsSync(eula)) {
+        fs.writeFileSync(eula, 'eula=true\n');
+      }
+      
+      return true;
+    } else {
+      console.error(`✗ Installation failed for server ${serverConfig.name} with exit code: ${installResult.StatusCode}`);
+      
+      // Get installation logs for debugging
+      const logs = await installContainer.logs({
+        stdout: true,
+        stderr: true
+      });
+      console.error('Installation logs:', logs.toString());
+      
+      return false;
+    }
+    
+  } catch (error) {
+    console.error('Error during server installation:', error);
+    return false;
+  }
+}
+
 // Helper function to create Docker container
 async function createGameServer(serverConfig) {
   const { id, name, egg, environment, ports, memory, startupCommand } = serverConfig;
@@ -619,7 +726,15 @@ app.post('/api/servers', async (req, res) => {
     
     console.log('Server config saved to:', configPath);
     
-    // Create Docker container
+    // Run server installation first
+    console.log('Starting server installation process...');
+    const installationSuccess = await runServerInstallation(serverConfig, eggConfig);
+    
+    if (!installationSuccess) {
+      return res.status(500).json({ error: 'Server installation failed' });
+    }
+    
+    // Create Docker container only after successful installation
     const container = await createGameServer(serverConfig);
     
     runningServers.set(serverId, {
@@ -978,6 +1093,274 @@ app.get('/api/servers/:id/debug', async (req, res) => {
     
   } catch (error) {
     console.error(`Debug error for server ${id}:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// File management endpoints
+
+// Get server files/directories
+app.get('/api/servers/:id/files', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { path: relativePath = '.' } = req.query;
+    
+    const serverDir = path.join(SERVER_DATA_PATH, id);
+    const fullPath = path.join(serverDir, relativePath);
+    
+    // Security check - ensure path is within server directory
+    if (!fullPath.startsWith(serverDir)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ error: 'Path not found' });
+    }
+    
+    const stats = fs.statSync(fullPath);
+    
+    if (stats.isDirectory()) {
+      const items = fs.readdirSync(fullPath, { withFileTypes: true })
+        .map(item => ({
+          name: item.name,
+          type: item.isDirectory() ? 'directory' : 'file',
+          size: item.isFile() ? fs.statSync(path.join(fullPath, item.name)).size : null,
+          modified: fs.statSync(path.join(fullPath, item.name)).mtime.toISOString()
+        }))
+        .sort((a, b) => {
+          // Directories first, then files
+          if (a.type !== b.type) {
+            return a.type === 'directory' ? -1 : 1;
+          }
+          return a.name.localeCompare(b.name);
+        });
+      
+      res.json({
+        type: 'directory',
+        path: relativePath,
+        items
+      });
+    } else {
+      // Return file info
+      res.json({
+        type: 'file',
+        path: relativePath,
+        size: stats.size,
+        modified: stats.mtime.toISOString()
+      });
+    }
+  } catch (error) {
+    console.error('Error getting server files:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Read file content
+app.get('/api/servers/:id/files/content', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { path: relativePath } = req.query;
+    
+    if (!relativePath) {
+      return res.status(400).json({ error: 'File path is required' });
+    }
+    
+    const serverDir = path.join(SERVER_DATA_PATH, id);
+    const fullPath = path.join(serverDir, relativePath);
+    
+    // Security check
+    if (!fullPath.startsWith(serverDir)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    const stats = fs.statSync(fullPath);
+    if (!stats.isFile()) {
+      return res.status(400).json({ error: 'Path is not a file' });
+    }
+    
+    // Check file size (limit to 10MB for editing)
+    if (stats.size > 10 * 1024 * 1024) {
+      return res.status(413).json({ error: 'File too large for editing' });
+    }
+    
+    const content = fs.readFileSync(fullPath, 'utf8');
+    res.json({
+      path: relativePath,
+      content,
+      size: stats.size,
+      modified: stats.mtime.toISOString()
+    });
+  } catch (error) {
+    console.error('Error reading file:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Write file content
+app.put('/api/servers/:id/files/content', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { path: relativePath, content } = req.body;
+    
+    if (!relativePath || content === undefined) {
+      return res.status(400).json({ error: 'File path and content are required' });
+    }
+    
+    const serverDir = path.join(SERVER_DATA_PATH, id);
+    const fullPath = path.join(serverDir, relativePath);
+    
+    // Security check
+    if (!fullPath.startsWith(serverDir)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    // Ensure directory exists
+    fs.ensureDirSync(path.dirname(fullPath));
+    
+    // Write file
+    fs.writeFileSync(fullPath, content, 'utf8');
+    
+    const stats = fs.statSync(fullPath);
+    res.json({
+      path: relativePath,
+      size: stats.size,
+      modified: stats.mtime.toISOString(),
+      success: true
+    });
+  } catch (error) {
+    console.error('Error writing file:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create directory
+app.post('/api/servers/:id/files/directory', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { path: relativePath, name } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ error: 'Directory name is required' });
+    }
+    
+    const serverDir = path.join(SERVER_DATA_PATH, id);
+    const basePath = path.join(serverDir, relativePath || '.');
+    const fullPath = path.join(basePath, name);
+    
+    // Security check
+    if (!fullPath.startsWith(serverDir)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    if (fs.existsSync(fullPath)) {
+      return res.status(409).json({ error: 'Directory already exists' });
+    }
+    
+    fs.ensureDirSync(fullPath);
+    
+    res.json({
+      path: path.join(relativePath || '.', name),
+      success: true
+    });
+  } catch (error) {
+    console.error('Error creating directory:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete file or directory
+app.delete('/api/servers/:id/files', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { path: relativePath } = req.query;
+    
+    if (!relativePath) {
+      return res.status(400).json({ error: 'File path is required' });
+    }
+    
+    const serverDir = path.join(SERVER_DATA_PATH, id);
+    const fullPath = path.join(serverDir, relativePath);
+    
+    // Security check
+    if (!fullPath.startsWith(serverDir)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ error: 'File or directory not found' });
+    }
+    
+    const stats = fs.statSync(fullPath);
+    if (stats.isDirectory()) {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+    } else {
+      fs.unlinkSync(fullPath);
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting file:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Server settings endpoints
+
+// Get server settings
+app.get('/api/servers/:id/settings', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const configPath = path.join(SERVER_DATA_PATH, id, 'config.json');
+    
+    if (!fs.existsSync(configPath)) {
+      return res.status(404).json({ error: 'Server not found' });
+    }
+    
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    res.json(config);
+  } catch (error) {
+    console.error('Error getting server settings:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update server settings
+app.put('/api/servers/:id/settings', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { startupCommand, environment, memory, cpu, disk } = req.body;
+    
+    const configPath = path.join(SERVER_DATA_PATH, id, 'config.json');
+    
+    if (!fs.existsSync(configPath)) {
+      return res.status(404).json({ error: 'Server not found' });
+    }
+    
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    
+    // Update settings
+    if (startupCommand !== undefined) config.startupCommand = startupCommand;
+    if (environment !== undefined) config.environment = environment;
+    if (memory !== undefined) config.memory = parseInt(memory);
+    if (cpu !== undefined) config.cpu = parseInt(cpu);
+    if (disk !== undefined) config.disk = parseInt(disk);
+    
+    // Save updated config
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    
+    // Update running server info
+    if (runningServers.has(id)) {
+      const serverInfo = runningServers.get(id);
+      runningServers.set(id, { ...serverInfo, ...config });
+    }
+    
+    res.json({ success: true, config });
+  } catch (error) {
+    console.error('Error updating server settings:', error);
     res.status(500).json({ error: error.message });
   }
 });
