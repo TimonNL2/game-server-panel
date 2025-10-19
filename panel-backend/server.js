@@ -616,7 +616,7 @@ async function createGameServer(serverConfig) {
   
   console.log(`Using startup command: ${processedStartupCommand}`);
   
-  // Build inline bash command (no separate script file needed)
+  // Build inline bash command with smart jar file detection
   const eulaHandling = isMinecraft ? `
     if [ ! -f eula.txt ]; then
       echo "eula=true" > eula.txt
@@ -627,13 +627,35 @@ async function createGameServer(serverConfig) {
     fi
   ` : '';
   
+  // Smart jar detection for Fabric servers
+  const jarDetection = isMinecraft && eggData?.name?.toLowerCase().includes('fabric') ? `
+    if [ -f fabric-server-launch.jar ]; then
+      JAR_FILE="fabric-server-launch.jar"
+      echo "✓ Using fabric-server-launch.jar"
+    elif [ -f server.jar ]; then
+      JAR_FILE="server.jar"
+      echo "✓ Using server.jar"
+    else
+      echo "❌ No server jar found!"
+      ls -la
+      exit 1
+    fi
+  ` : '';
+  
+  // Replace jar filename in command if needed
+  let finalCommand = processedStartupCommand;
+  if (isMinecraft && eggData?.name?.toLowerCase().includes('fabric')) {
+    finalCommand = processedStartupCommand.replace(/fabric-server-launch\.jar/g, '$JAR_FILE');
+  }
+  
   const inlineCommand = `
     cd /home/container || exit 1
     echo "=== Server Starting ==="
     ls -la
     ${eulaHandling}
-    echo "Running: ${processedStartupCommand}"
-    ${processedStartupCommand}
+    ${jarDetection}
+    echo "Running: ${finalCommand}"
+    ${finalCommand}
   `.trim();
   
   // Configure container with inline command
