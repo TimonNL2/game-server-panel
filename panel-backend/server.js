@@ -919,57 +919,71 @@ app.post('/api/servers/:id/start', async (req, res) => {
     try {
       console.log(`Setting up log streaming for server ${id}`);
       
-      // Start a background process to continuously read logs
-      const startLogStreaming = async () => {
-        while (true) {
-          try {
-            const logs = await container.logs({
-              stdout: true,
-              stderr: true,
-              follow: false,
-              tail: 50,
-              timestamps: false
-            });
-            
-            const logText = logs.toString('utf8');
-            const lines = logText.split('\n').filter(l => l.trim());
-            
-            lines.forEach(line => {
-              // Remove Docker header (first 8 bytes as hex characters)
-              const cleanLine = line.replace(/^[\x00-\x1F\x7F-\x9F]+/, '').trim();
-              
-              if (cleanLine && cleanLine.length > 0) {
-                console.log(`[Server ${id}] ${cleanLine}`);
-                
-                const logData = { 
-                  serverId: id, 
-                  log: cleanLine,
-                  timestamp: new Date().toISOString()
-                };
-                
-                io.to(`server_${id}`).emit('server_log', logData);
-              }
-            });
-            
-            // Wait 1 second before next poll
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-          } catch (err) {
-            // Container might be stopped
-            if (err.statusCode === 404) {
-              console.log(`Container for server ${id} no longer exists, stopping log stream`);
-              break;
-            }
-            console.error(`Error fetching logs for ${id}:`, err.message);
-            await new Promise(resolve => setTimeout(resolve, 2000));
+      const serverDir = path.join(SERVER_DATA_PATH, id);
+      const logFile = path.join(serverDir, 'logs', 'latest.log');
+      
+      // Track last read position
+      let lastSize = 0;
+      
+      // Function to read new log lines
+      const readNewLogs = () => {
+        try {
+          // Check if log file exists
+          if (!fs.existsSync(logFile)) {
+            return;
           }
+          
+          const stats = fs.statSync(logFile);
+          const currentSize = stats.size;
+          
+          // Only read if file grew
+          if (currentSize > lastSize) {
+            const stream = fs.createReadStream(logFile, {
+              start: lastSize,
+              end: currentSize,
+              encoding: 'utf8'
+            });
+            
+            let buffer = '';
+            
+            stream.on('data', (chunk) => {
+              buffer += chunk;
+              const lines = buffer.split('\n');
+              
+              // Keep last incomplete line in buffer
+              buffer = lines.pop() || '';
+              
+              // Emit complete lines
+              lines.forEach(line => {
+                if (line.trim()) {
+                  console.log(`[Server ${id}] ${line}`);
+                  
+                  io.to(`server_${id}`).emit('server_log', { 
+                    serverId: id, 
+                    log: line.trim(),
+                    timestamp: new Date().toISOString()
+                  });
+                }
+              });
+            });
+            
+            stream.on('end', () => {
+              lastSize = currentSize;
+            });
+          }
+        } catch (err) {
+          // Log file might not exist yet
         }
       };
       
-      // Start streaming in background
-      startLogStreaming().catch(err => {
-        console.error(`Log streaming failed for ${id}:`, err);
-      });
+      // Poll log file every 500ms
+      const logInterval = setInterval(readNewLogs, 500);
+      
+      // Store interval so we can clear it later
+      if (!global.serverLogIntervals) {
+        global.serverLogIntervals = new Map();
+      }
+      global.serverLogIntervals.set(id, logInterval);
       
       console.log(`Log streaming started for server ${id}`);
       
@@ -989,6 +1003,13 @@ app.post('/api/servers/:id/stop', async (req, res) => {
   try {
     const { id } = req.params;
     const container = docker.getContainer(`game_server_${id}`);
+    
+    // Clear log streaming interval
+    if (global.serverLogIntervals && global.serverLogIntervals.has(id)) {
+      clearInterval(global.serverLogIntervals.get(id));
+      global.serverLogIntervals.delete(id);
+      console.log(`Cleared log streaming for server ${id}`);
+    }
     
     await container.stop();
     res.json({ message: 'Server stopped' });
