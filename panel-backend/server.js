@@ -390,11 +390,18 @@ async function runServerInstallation(serverConfig, eggData) {
     // Add server memory as environment variable
     installEnv.push(`SERVER_MEMORY=${serverConfig.memory || 1024}`);
     
+    // Clean the installation script - remove Windows line endings and fix apt commands
+    let cleanScript = installScript.script
+      .replace(/\r\n/g, '\n')  // Remove Windows line endings
+      .replace(/\r/g, '\n')     // Remove any remaining \r
+      .replace(/apt update/g, 'apt-get update')  // Fix apt commands
+      .replace(/apt install/g, 'apt-get install');
+    
     // Create installation container
     const installContainerConfig = {
       name: `install_${serverConfig.id}`,
       Image: installImage,
-      Cmd: [installScript.entrypoint || 'bash', '-c', installScript.script],
+      Cmd: [installScript.entrypoint || 'bash', '-c', cleanScript],
       Env: installEnv,
       HostConfig: {
         Binds: [`${serverDir}:/mnt/server`],
