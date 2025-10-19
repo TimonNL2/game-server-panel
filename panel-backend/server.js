@@ -915,90 +915,51 @@ app.post('/api/servers/:id/start', async (req, res) => {
     await container.start();
     console.log(`Container game_server_${id} started successfully`);
     
-    // Setup log streaming with better error handling
+    // Setup log streaming with attach for real-time logs
     try {
-      const logStream = await container.logs({
-        follow: true,
+      console.log(`Setting up log streaming for server ${id}`);
+      
+      // Method 1: Use attach for real-time streaming
+      const attachStream = await container.attach({
+        stream: true,
         stdout: true,
         stderr: true,
-        timestamps: false  // Disable Docker timestamps, we'll add our own
+        logs: true
       });
       
-      console.log(`Log streaming setup for server ${id}`);
+      attachStream.setEncoding('utf8');
       
-      // Docker multiplexes stdout/stderr, need to demux
-      logStream.on('data', (chunk) => {
-        // Docker log format: 8 bytes header + payload
-        // Header: [stream_type, 0, 0, 0, size1, size2, size3, size4]
-        let offset = 0;
-        while (offset < chunk.length) {
-          // Check if we have enough bytes for header
-          if (offset + 8 > chunk.length) break;
+      attachStream.on('data', (data) => {
+        try {
+          // Remove Docker multiplexing headers and ANSI codes
+          const lines = data.toString()
+            .replace(/[\x00-\x08]/g, '') // Remove control characters
+            .split('\n')
+            .filter(line => line.trim().length > 0);
           
-          const header = chunk.slice(offset, offset + 8);
-          const payloadSize = header.readUInt32BE(4);
-          
-          if (offset + 8 + payloadSize > chunk.length) break;
-          
-          const payload = chunk.slice(offset + 8, offset + 8 + payloadSize);
-          const log = payload.toString('utf8').trim();
-          
-          if (log) {
-            console.log(`[Server ${id}] Log:`, log);
-            io.to(`server_${id}`).emit('server_log', { 
-              serverId: id, 
-              log: log,
-              timestamp: new Date().toISOString()
-            });
-          }
-          
-          offset += 8 + payloadSize;
-        }
-      });
-      
-      logStream.on('error', (error) => {
-        console.error(`Log stream error for server ${id}:`, error);
-      });
-      
-      // Also get existing logs
-      const existingLogs = await container.logs({
-        stdout: true,
-        stderr: true,
-        timestamps: false,
-        tail: 100
-      });
-      
-      // Parse existing logs the same way
-      let offset = 0;
-      const existingLogLines = [];
-      while (offset < existingLogs.length) {
-        if (offset + 8 > existingLogs.length) break;
-        
-        const header = existingLogs.slice(offset, offset + 8);
-        const payloadSize = header.readUInt32BE(4);
-        
-        if (offset + 8 + payloadSize > existingLogs.length) break;
-        
-        const payload = existingLogs.slice(offset + 8, offset + 8 + payloadSize);
-        const log = payload.toString('utf8').trim();
-        
-        if (log) {
-          existingLogLines.push(log);
-        }
-        
-        offset += 8 + payloadSize;
-      }
-      
-      if (existingLogLines.length > 0) {
-        console.log(`[Server ${id}] Sending ${existingLogLines.length} existing log lines`);
-        existingLogLines.forEach(log => {
-          io.to(`server_${id}`).emit('server_log', { 
-            serverId: id, 
-            log: log,
-            timestamp: new Date().toISOString()
+          lines.forEach(line => {
+            const cleanLine = line.trim();
+            if (cleanLine) {
+              console.log(`[Server ${id}] ${cleanLine}`);
+              io.to(`server_${id}`).emit('server_log', { 
+                serverId: id, 
+                log: cleanLine,
+                timestamp: new Date().toISOString()
+              });
+            }
           });
-        });
-      }
+        } catch (err) {
+          console.error(`Error processing log data:`, err);
+        }
+      });
+      
+      attachStream.on('error', (error) => {
+        console.error(`Attach stream error for server ${id}:`, error);
+      });
+      
+      attachStream.on('end', () => {
+        console.log(`Attach stream ended for server ${id}`);
+      });
       
     } catch (logError) {
       console.error(`Failed to setup log streaming for server ${id}:`, logError);
