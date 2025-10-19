@@ -58,9 +58,10 @@ function ServerDetail() {
   };
 
   const handleServerLog = (data) => {
+    console.log('Received server log:', data); // Debug logging
     if (data.serverId === id) {
       setLogs(prev => [...prev, {
-        timestamp: new Date(),
+        timestamp: new Date(data.timestamp || new Date()),
         message: data.log.replace(/\x1b\[[0-9;]*m/g, '') // Remove ANSI codes
       }]);
     }

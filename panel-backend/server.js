@@ -255,10 +255,10 @@ async function scanEggs() {
 async function preloadBaseImages() {
   const baseImages = [
     'node:18-alpine',
-    'openjdk:17-jre-slim',
-    'openjdk:11-jre-slim',
-    'openjdk:8-jre-slim',
-    'python:3.11-slim',
+    'openjdk:17-jre-alpine',
+    'openjdk:11-jre-alpine',
+    'openjdk:8-jre-alpine',
+    'python:3.11-alpine',
     'ubuntu:20.04',
     'debian:bullseye-slim'
   ];
@@ -355,20 +355,20 @@ async function createGameServer(serverConfig) {
       
       // Define better image mappings for Pterodactyl yolks
       const imageMap = {
-        'ghcr.io/pterodactyl/yolks:java_8': 'openjdk:8-jre-slim',
-        'ghcr.io/pterodactyl/yolks:java_11': 'openjdk:11-jre-slim',
-        'ghcr.io/pterodactyl/yolks:java_16': 'openjdk:16-jre-slim',
-        'ghcr.io/pterodactyl/yolks:java_17': 'openjdk:17-jre-slim',
-        'ghcr.io/pterodactyl/yolks:java_18': 'openjdk:18-jre-slim',
-        'ghcr.io/pterodactyl/yolks:java_19': 'openjdk:19-jre-slim',
+        'ghcr.io/pterodactyl/yolks:java_8': 'openjdk:8-jre-alpine',
+        'ghcr.io/pterodactyl/yolks:java_11': 'openjdk:11-jre-alpine',
+        'ghcr.io/pterodactyl/yolks:java_16': 'openjdk:16-jre-alpine',
+        'ghcr.io/pterodactyl/yolks:java_17': 'openjdk:17-jre-alpine',
+        'ghcr.io/pterodactyl/yolks:java_18': 'openjdk:18-jre-alpine',
+        'ghcr.io/pterodactyl/yolks:java_19': 'openjdk:19-jre-alpine',
         'ghcr.io/pterodactyl/yolks:nodejs_16': 'node:16-alpine',
         'ghcr.io/pterodactyl/yolks:nodejs_17': 'node:17-alpine',
         'ghcr.io/pterodactyl/yolks:nodejs_18': 'node:18-alpine',
         'ghcr.io/pterodactyl/yolks:nodejs_19': 'node:19-alpine',
-        'ghcr.io/pterodactyl/yolks:python_3.8': 'python:3.8-slim',
-        'ghcr.io/pterodactyl/yolks:python_3.9': 'python:3.9-slim',
-        'ghcr.io/pterodactyl/yolks:python_3.10': 'python:3.10-slim',
-        'ghcr.io/pterodactyl/yolks:python_3.11': 'python:3.11-slim',
+        'ghcr.io/pterodactyl/yolks:python_3.8': 'python:3.8-alpine',
+        'ghcr.io/pterodactyl/yolks:python_3.9': 'python:3.9-alpine',
+        'ghcr.io/pterodactyl/yolks:python_3.10': 'python:3.10-alpine',
+        'ghcr.io/pterodactyl/yolks:python_3.11': 'python:3.11-alpine',
         'ghcr.io/parkervcp/steamcmd:proton': 'ubuntu:20.04',
         'ghcr.io/parkervcp/steamcmd:debian': 'debian:bullseye-slim',
         'ghcr.io/parkervcp/steamcmd:ubuntu': 'ubuntu:20.04',
