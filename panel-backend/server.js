@@ -871,6 +871,36 @@ app.post('/api/servers/:id/start', async (req, res) => {
     const { id } = req.params;
     console.log(`Starting server ${id}...`);
     
+    // Check for EULA requirement and auto-accept
+    const serverDir = path.join(SERVER_DATA_PATH, id);
+    const eulaPath = path.join(serverDir, 'eula.txt');
+    
+    // For Minecraft servers, check if EULA needs to be accepted
+    const configPath = path.join(serverDir, 'config.json');
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const eggName = config.egg?.name?.toLowerCase() || '';
+      
+      // Check if this is a game that requires EULA acceptance
+      const requiresEula = eggName.includes('minecraft') || 
+                          eggName.includes('java') ||
+                          config.egg?.features?.includes('eula');
+      
+      if (requiresEula) {
+        // Check if eula.txt exists and is not accepted
+        if (!fs.existsSync(eulaPath)) {
+          console.log(`Creating EULA file for server ${id}`);
+          fs.writeFileSync(eulaPath, 'eula=true\n');
+        } else {
+          const eulaContent = fs.readFileSync(eulaPath, 'utf8');
+          if (!eulaContent.includes('eula=true')) {
+            console.log(`Accepting EULA for server ${id}`);
+            fs.writeFileSync(eulaPath, eulaContent.replace(/eula=false/g, 'eula=true'));
+          }
+        }
+      }
+    }
+    
     const container = docker.getContainer(`game_server_${id}`);
     
     // Check if container exists
@@ -891,20 +921,38 @@ app.post('/api/servers/:id/start', async (req, res) => {
         follow: true,
         stdout: true,
         stderr: true,
-        timestamps: true
+        timestamps: false  // Disable Docker timestamps, we'll add our own
       });
       
       console.log(`Log streaming setup for server ${id}`);
       
+      // Docker multiplexes stdout/stderr, need to demux
       logStream.on('data', (chunk) => {
-        const log = chunk.toString().trim();
-        if (log) {
-          console.log(`[Server ${id}] Log:`, log);
-          io.to(`server_${id}`).emit('server_log', { 
-            serverId: id, 
-            log: log,
-            timestamp: new Date().toISOString()
-          });
+        // Docker log format: 8 bytes header + payload
+        // Header: [stream_type, 0, 0, 0, size1, size2, size3, size4]
+        let offset = 0;
+        while (offset < chunk.length) {
+          // Check if we have enough bytes for header
+          if (offset + 8 > chunk.length) break;
+          
+          const header = chunk.slice(offset, offset + 8);
+          const payloadSize = header.readUInt32BE(4);
+          
+          if (offset + 8 + payloadSize > chunk.length) break;
+          
+          const payload = chunk.slice(offset + 8, offset + 8 + payloadSize);
+          const log = payload.toString('utf8').trim();
+          
+          if (log) {
+            console.log(`[Server ${id}] Log:`, log);
+            io.to(`server_${id}`).emit('server_log', { 
+              serverId: id, 
+              log: log,
+              timestamp: new Date().toISOString()
+            });
+          }
+          
+          offset += 8 + payloadSize;
         }
       });
       
@@ -916,17 +964,39 @@ app.post('/api/servers/:id/start', async (req, res) => {
       const existingLogs = await container.logs({
         stdout: true,
         stderr: true,
-        timestamps: true,
+        timestamps: false,
         tail: 100
       });
       
-      const existingLogData = existingLogs.toString().trim();
-      if (existingLogData) {
-        console.log(`[Server ${id}] Existing logs:`, existingLogData);
-        io.to(`server_${id}`).emit('server_log', { 
-          serverId: id, 
-          log: existingLogData,
-          timestamp: new Date().toISOString()
+      // Parse existing logs the same way
+      let offset = 0;
+      const existingLogLines = [];
+      while (offset < existingLogs.length) {
+        if (offset + 8 > existingLogs.length) break;
+        
+        const header = existingLogs.slice(offset, offset + 8);
+        const payloadSize = header.readUInt32BE(4);
+        
+        if (offset + 8 + payloadSize > existingLogs.length) break;
+        
+        const payload = existingLogs.slice(offset + 8, offset + 8 + payloadSize);
+        const log = payload.toString('utf8').trim();
+        
+        if (log) {
+          existingLogLines.push(log);
+        }
+        
+        offset += 8 + payloadSize;
+      }
+      
+      if (existingLogLines.length > 0) {
+        console.log(`[Server ${id}] Sending ${existingLogLines.length} existing log lines`);
+        existingLogLines.forEach(log => {
+          io.to(`server_${id}`).emit('server_log', { 
+            serverId: id, 
+            log: log,
+            timestamp: new Date().toISOString()
+          });
         });
       }
       
@@ -998,6 +1068,46 @@ app.post('/api/servers/:id/command', async (req, res) => {
   }
 });
 
+// Check EULA status
+app.get('/api/servers/:id/eula', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const serverDir = path.join(SERVER_DATA_PATH, id);
+    const eulaPath = path.join(serverDir, 'eula.txt');
+    
+    if (!fs.existsSync(eulaPath)) {
+      return res.json({ exists: false, accepted: false, required: true });
+    }
+    
+    const eulaContent = fs.readFileSync(eulaPath, 'utf8');
+    const accepted = eulaContent.includes('eula=true');
+    
+    res.json({ exists: true, accepted, required: true, content: eulaContent });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Accept EULA
+app.post('/api/servers/:id/eula/accept', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const serverDir = path.join(SERVER_DATA_PATH, id);
+    const eulaPath = path.join(serverDir, 'eula.txt');
+    
+    const eulaContent = `# By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).
+# Generated by Game Server Panel
+eula=true
+`;
+    
+    fs.writeFileSync(eulaPath, eulaContent);
+    
+    res.json({ message: 'EULA accepted', accepted: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Delete server
 app.delete('/api/servers/:id', async (req, res) => {
   try {
@@ -1059,7 +1169,7 @@ app.get('/api/servers/:id/files', async (req, res) => {
         };
       });
       
-      res.json({ type: 'directory', files });
+      res.json({ type: 'directory', items: files, files }); // Support both 'items' and 'files'
     } else {
       const content = fs.readFileSync(targetPath, 'utf8');
       res.json({ type: 'file', content });

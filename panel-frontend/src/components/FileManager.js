@@ -21,19 +21,27 @@ function FileManager() {
   const loadFiles = async () => {
     try {
       setLoading(true);
+      console.log(`Loading files for server ${id}, path: ${currentPath}`);
+      
       const response = await axios.get(`/api/servers/${id}/files`, {
         params: { path: currentPath }
       });
       
+      console.log('Files API response:', response.data);
+      
       if (response.data.type === 'directory') {
-        setFiles(response.data.items);
+        const fileList = response.data.items || response.data.files || [];
+        console.log(`Found ${fileList.length} files/directories`);
+        setFiles(fileList);
         setSelectedFile(null);
         setFileContent('');
         setIsEditing(false);
       }
     } catch (error) {
       console.error('Error loading files:', error);
-      toast.error('Failed to load files');
+      console.error('Error response:', error.response?.data);
+      toast.error(`Failed to load files: ${error.response?.data?.error || error.message}`);
+      setFiles([]);
     } finally {
       setLoading(false);
     }

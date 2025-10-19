@@ -25,10 +25,12 @@ function ServerDetail() {
   const [activeTab, setActiveTab] = useState('console');
   const [logs, setLogs] = useState([]);
   const [command, setCommand] = useState('');
+  const [showEulaModal, setShowEulaModal] = useState(false);
   const logsEndRef = useRef(null);
 
   useEffect(() => {
     fetchServer();
+    checkEulaStatus();
     if (socket) {
       joinServer(id);
       
@@ -57,6 +59,29 @@ function ServerDetail() {
       navigate('/servers');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkEulaStatus = async () => {
+    try {
+      const response = await axios.get(`/api/servers/${id}/eula`);
+      if (response.data.required && !response.data.accepted) {
+        setShowEulaModal(true);
+      }
+    } catch (error) {
+      // Silently fail - not all servers need EULA
+      console.log('EULA check:', error.message);
+    }
+  };
+
+  const acceptEula = async () => {
+    try {
+      await axios.post(`/api/servers/${id}/eula/accept`);
+      toast.success('EULA geaccepteerd! Je kunt nu de server starten.');
+      setShowEulaModal(false);
+    } catch (error) {
+      console.error('Error accepting EULA:', error);
+      toast.error('Fout bij accepteren EULA');
     }
   };
 
@@ -148,6 +173,38 @@ function ServerDetail() {
 
   return (
     <div className="space-y-6">
+      {/* EULA Modal */}
+      {showEulaModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-8 max-w-md w-full mx-4">
+            <h2 className="text-2xl font-bold text-white mb-4">Minecraft EULA</h2>
+            <p className="text-gray-300 mb-6">
+              Om deze Minecraft server te kunnen starten, moet je akkoord gaan met de Minecraft End User License Agreement (EULA).
+            </p>
+            <p className="text-gray-400 text-sm mb-6">
+              Door op "Accepteren" te klikken, ga je akkoord met de voorwaarden op: <br/>
+              <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300">
+                https://aka.ms/MinecraftEULA
+              </a>
+            </p>
+            <div className="flex space-x-3">
+              <button
+                onClick={acceptEula}
+                className="flex-1 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition"
+              >
+                Accepteren
+              </button>
+              <button
+                onClick={() => setShowEulaModal(false)}
+                className="flex-1 bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 transition"
+              >
+                Annuleren
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Server Header */}
       <div className="card p-6">
         <div className="flex items-center justify-between">
