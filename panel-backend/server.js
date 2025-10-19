@@ -255,10 +255,10 @@ async function scanEggs() {
 async function preloadBaseImages() {
   const baseImages = [
     'node:18-alpine',
-    'openjdk:17-jre-alpine',
-    'openjdk:11-jre-alpine',
-    'openjdk:8-jre-alpine',
-    'python:3.11-alpine',
+    'eclipse-temurin:17-jre',
+    'eclipse-temurin:11-jre',
+    'eclipse-temurin:8-jre',
+    'python:3.11-slim',
     'ubuntu:20.04',
     'debian:bullseye-slim'
   ];
@@ -353,26 +353,29 @@ async function createGameServer(serverConfig) {
       const preferredImage = dockerImages.find(img => img.includes('java_17')) || dockerImages[0];
       originalImage = preferredImage;
       
-      // Define better image mappings for Pterodactyl yolks
+      // Define comprehensive image mappings for Pterodactyl yolks
       const imageMap = {
-        'ghcr.io/pterodactyl/yolks:java_8': 'openjdk:8-jre-alpine',
-        'ghcr.io/pterodactyl/yolks:java_11': 'openjdk:11-jre-alpine',
-        'ghcr.io/pterodactyl/yolks:java_16': 'openjdk:16-jre-alpine',
-        'ghcr.io/pterodactyl/yolks:java_17': 'openjdk:17-jre-alpine',
-        'ghcr.io/pterodactyl/yolks:java_18': 'openjdk:18-jre-alpine',
-        'ghcr.io/pterodactyl/yolks:java_19': 'openjdk:19-jre-alpine',
+        'ghcr.io/pterodactyl/yolks:java_8': 'eclipse-temurin:8-jre',
+        'ghcr.io/pterodactyl/yolks:java_11': 'eclipse-temurin:11-jre',
+        'ghcr.io/pterodactyl/yolks:java_16': 'eclipse-temurin:16-jre',
+        'ghcr.io/pterodactyl/yolks:java_17': 'eclipse-temurin:17-jre',
+        'ghcr.io/pterodactyl/yolks:java_18': 'eclipse-temurin:18-jre',
+        'ghcr.io/pterodactyl/yolks:java_19': 'eclipse-temurin:19-jre',
+        'ghcr.io/pterodactyl/yolks:java_21': 'eclipse-temurin:21-jre',
         'ghcr.io/pterodactyl/yolks:nodejs_16': 'node:16-alpine',
         'ghcr.io/pterodactyl/yolks:nodejs_17': 'node:17-alpine',
         'ghcr.io/pterodactyl/yolks:nodejs_18': 'node:18-alpine',
         'ghcr.io/pterodactyl/yolks:nodejs_19': 'node:19-alpine',
-        'ghcr.io/pterodactyl/yolks:python_3.8': 'python:3.8-alpine',
-        'ghcr.io/pterodactyl/yolks:python_3.9': 'python:3.9-alpine',
-        'ghcr.io/pterodactyl/yolks:python_3.10': 'python:3.10-alpine',
-        'ghcr.io/pterodactyl/yolks:python_3.11': 'python:3.11-alpine',
-        'ghcr.io/parkervcp/steamcmd:proton': 'ubuntu:20.04',
-        'ghcr.io/parkervcp/steamcmd:debian': 'debian:bullseye-slim',
-        'ghcr.io/parkervcp/steamcmd:ubuntu': 'ubuntu:20.04',
-        'ghcr.io/pterodactyl/yolks:steamcmd': 'ubuntu:20.04'
+        'ghcr.io/pterodactyl/yolks:nodejs_20': 'node:20-alpine',
+        'ghcr.io/pterodactyl/yolks:python_3.8': 'python:3.8-slim',
+        'ghcr.io/pterodactyl/yolks:python_3.9': 'python:3.9-slim',
+        'ghcr.io/pterodactyl/yolks:python_3.10': 'python:3.10-slim',
+        'ghcr.io/pterodactyl/yolks:python_3.11': 'python:3.11-slim',
+        'ghcr.io/pterodactyl/yolks:python_3.12': 'python:3.12-slim',
+        'ghcr.io/parkervcp/steamcmd:proton': 'steamcmd/steamcmd:latest',
+        'ghcr.io/parkervcp/steamcmd:debian': 'steamcmd/steamcmd:latest',
+        'ghcr.io/parkervcp/steamcmd:ubuntu': 'steamcmd/steamcmd:latest',
+        'ghcr.io/pterodactyl/yolks:steamcmd': 'steamcmd/steamcmd:latest'
       };
       
       // Check if we have a mapping for this image
@@ -392,9 +395,34 @@ async function createGameServer(serverConfig) {
   // Try to pull the image first
   const imagePulled = await pullDockerImage(dockerImage);
   if (!imagePulled) {
-    console.log(`Failed to pull ${dockerImage}, falling back to node:18-alpine`);
-    dockerImage = 'node:18-alpine';
-    await pullDockerImage(dockerImage); // Ensure fallback image is available
+    console.log(`Failed to pull ${dockerImage}, trying fallback strategies...`);
+    
+    // Try alternative Java images if it was a Java image
+    if (originalImage && originalImage.includes('java')) {
+      const javaFallbacks = [
+        'eclipse-temurin:17-jre',
+        'eclipse-temurin:11-jre', 
+        'eclipse-temurin:8-jre',
+        'openjdk:17-jre',
+        'openjdk:11-jre',
+        'openjdk:8-jre'
+      ];
+      
+      for (const fallback of javaFallbacks) {
+        console.log(`Trying Java fallback: ${fallback}`);
+        if (await pullDockerImage(fallback)) {
+          dockerImage = fallback;
+          console.log(`Successfully using Java fallback: ${fallback}`);
+          break;
+        }
+      }
+    }
+    
+    // Final fallback only if no Java alternative worked
+    if (!imagePulled && dockerImage.includes('node')) {
+      dockerImage = 'node:18-alpine';
+      await pullDockerImage(dockerImage);
+    }
   }
   
   // Create port bindings

@@ -6,10 +6,10 @@ Write-Host "🐳 Setting up Docker images for Game Panel..." -ForegroundColor Cy
 # Base images needed for different game types
 $Images = @(
     "node:18-alpine",
-    "openjdk:8-jre-alpine",
-    "openjdk:11-jre-alpine", 
-    "openjdk:17-jre-alpine",
-    "python:3.11-alpine",
+    "eclipse-temurin:8-jre",
+    "eclipse-temurin:11-jre", 
+    "eclipse-temurin:17-jre",
+    "python:3.11-slim",
     "ubuntu:20.04",
     "debian:bullseye-slim",
     "alpine:latest"
