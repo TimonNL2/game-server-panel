@@ -655,7 +655,7 @@ async function createGameServer(serverConfig) {
     ${eulaHandling}
     ${jarDetection}
     echo "Running: ${finalCommand}"
-    ${finalCommand}
+    exec ${finalCommand} nogui
   `.trim();
   
   // Configure container with inline command
