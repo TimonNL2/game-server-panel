@@ -242,6 +242,90 @@ async function scanEggs() {
   return sortedEggs;
 }
 
+// Preload commonly used Docker images
+async function preloadBaseImages() {
+  const baseImages = [
+    'node:18-alpine',
+    'openjdk:17-jre-slim',
+    'openjdk:11-jre-slim',
+    'openjdk:8-jre-slim',
+    'python:3.11-slim',
+    'ubuntu:20.04',
+    'debian:bullseye-slim'
+  ];
+  
+  console.log('Preloading base Docker images...');
+  
+  for (const image of baseImages) {
+    try {
+      // Check if image exists locally first
+      await docker.getImage(image).inspect();
+      console.log(`✓ Image ${image} already available`);
+    } catch (error) {
+      if (error.statusCode === 404) {
+        console.log(`Pulling base image: ${image}...`);
+        try {
+          const stream = await docker.pull(image);
+          await new Promise((resolve, reject) => {
+            docker.modem.followProgress(stream, (err, res) => {
+              if (err) {
+                reject(err);
+              } else {
+                console.log(`✓ Successfully pulled ${image}`);
+                resolve(res);
+              }
+            });
+          });
+        } catch (pullError) {
+          console.log(`⚠ Failed to pull ${image}: ${pullError.message}`);
+        }
+      }
+    }
+  }
+  
+  console.log('Base image preloading completed');
+}
+
+// Helper function to pull Docker image if needed
+async function pullDockerImage(imageName) {
+  try {
+    console.log(`Checking if image ${imageName} exists locally...`);
+    
+    // Check if image exists locally
+    try {
+      await docker.getImage(imageName).inspect();
+      console.log(`Image ${imageName} already exists locally`);
+      return true;
+    } catch (error) {
+      if (error.statusCode === 404) {
+        console.log(`Image ${imageName} not found locally, pulling from registry...`);
+        
+        // Pull the image
+        const stream = await docker.pull(imageName);
+        
+        // Wait for pull to complete
+        await new Promise((resolve, reject) => {
+          docker.modem.followProgress(stream, (err, res) => {
+            if (err) {
+              reject(err);
+            } else {
+              console.log(`Successfully pulled image ${imageName}`);
+              resolve(res);
+            }
+          });
+        });
+        
+        return true;
+      } else {
+        throw error;
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to pull image ${imageName}:`, error.message);
+    return false;
+  }
+}
+
 // Helper function to create Docker container
 async function createGameServer(serverConfig) {
   const { id, name, egg, environment, ports, memory } = serverConfig;
@@ -249,9 +333,60 @@ async function createGameServer(serverConfig) {
   const serverDir = path.join(SERVER_DATA_PATH, id);
   fs.ensureDirSync(serverDir);
   
-  // Get Docker image from egg
-  const dockerImages = Object.values(egg.docker_images);
-  const dockerImage = dockerImages[0]; // Use first available image
+  // Get Docker image from egg with fallbacks
+  let dockerImage = 'node:18-alpine'; // Default fallback
+  let originalImage = null;
+  
+  if (egg.docker_images) {
+    const dockerImages = Object.values(egg.docker_images);
+    if (dockerImages.length > 0) {
+      // Try to use Java 17 for Minecraft, otherwise use the first available
+      const preferredImage = dockerImages.find(img => img.includes('java_17')) || dockerImages[0];
+      originalImage = preferredImage;
+      
+      // Define better image mappings for Pterodactyl yolks
+      const imageMap = {
+        'ghcr.io/pterodactyl/yolks:java_8': 'openjdk:8-jre-slim',
+        'ghcr.io/pterodactyl/yolks:java_11': 'openjdk:11-jre-slim',
+        'ghcr.io/pterodactyl/yolks:java_16': 'openjdk:16-jre-slim',
+        'ghcr.io/pterodactyl/yolks:java_17': 'openjdk:17-jre-slim',
+        'ghcr.io/pterodactyl/yolks:java_18': 'openjdk:18-jre-slim',
+        'ghcr.io/pterodactyl/yolks:java_19': 'openjdk:19-jre-slim',
+        'ghcr.io/pterodactyl/yolks:nodejs_16': 'node:16-alpine',
+        'ghcr.io/pterodactyl/yolks:nodejs_17': 'node:17-alpine',
+        'ghcr.io/pterodactyl/yolks:nodejs_18': 'node:18-alpine',
+        'ghcr.io/pterodactyl/yolks:nodejs_19': 'node:19-alpine',
+        'ghcr.io/pterodactyl/yolks:python_3.8': 'python:3.8-slim',
+        'ghcr.io/pterodactyl/yolks:python_3.9': 'python:3.9-slim',
+        'ghcr.io/pterodactyl/yolks:python_3.10': 'python:3.10-slim',
+        'ghcr.io/pterodactyl/yolks:python_3.11': 'python:3.11-slim',
+        'ghcr.io/parkervcp/steamcmd:proton': 'ubuntu:20.04',
+        'ghcr.io/parkervcp/steamcmd:debian': 'debian:bullseye-slim',
+        'ghcr.io/parkervcp/steamcmd:ubuntu': 'ubuntu:20.04',
+        'ghcr.io/pterodactyl/yolks:steamcmd': 'ubuntu:20.04'
+      };
+      
+      // Check if we have a mapping for this image
+      if (imageMap[preferredImage]) {
+        dockerImage = imageMap[preferredImage];
+      } else {
+        dockerImage = preferredImage;
+      }
+    }
+  }
+  
+  console.log(`Selected Docker image: ${dockerImage} for server ${name}`);
+  if (originalImage && originalImage !== dockerImage) {
+    console.log(`Mapped from original image: ${originalImage}`);
+  }
+  
+  // Try to pull the image first
+  const imagePulled = await pullDockerImage(dockerImage);
+  if (!imagePulled) {
+    console.log(`Failed to pull ${dockerImage}, falling back to node:18-alpine`);
+    dockerImage = 'node:18-alpine';
+    await pullDockerImage(dockerImage); // Ensure fallback image is available
+  }
   
   // Create port bindings
   const portBindings = {};
@@ -287,11 +422,37 @@ async function createGameServer(serverConfig) {
   };
   
   try {
+    console.log(`Creating container with config:`, { name: containerConfig.name, image: containerConfig.Image });
+    
     const container = await docker.createContainer(containerConfig);
+    console.log(`Successfully created container ${containerConfig.name}`);
     return container;
   } catch (error) {
     console.error('Error creating container:', error);
-    throw error;
+    
+    // If the image still doesn't exist after pulling, try with generic fallback
+    if (error.statusCode === 404 && error.json && error.json.message.includes('No such image')) {
+      console.log('Image still not found after pulling, trying with final fallback...');
+      
+      // Ensure the fallback image is available
+      await pullDockerImage('node:18-alpine');
+      
+      const fallbackConfig = {
+        ...containerConfig,
+        Image: 'node:18-alpine'
+      };
+      
+      try {
+        const container = await docker.createContainer(fallbackConfig);
+        console.log('Successfully created container with fallback image');
+        return container;
+      } catch (fallbackError) {
+        console.error('Final fallback also failed:', fallbackError);
+        throw new Error(`Failed to create container with any available image: ${fallbackError.message}`);
+      }
+    }
+    
+    throw new Error(`Container creation failed: ${error.message}`);
   }
 }
 
@@ -634,8 +795,13 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`Game Panel Backend running on port ${PORT}`);
   console.log(`Eggs path: ${EGGS_PATH}`);
   console.log(`Server data path: ${SERVER_DATA_PATH}`);
+  
+  // Preload base Docker images in background
+  preloadBaseImages().catch(err => {
+    console.log('Warning: Failed to preload some Docker images:', err.message);
+  });
 });

@@ -4,13 +4,15 @@ Een moderne game server management panel vergelijkbaar met Pterodactyl, maar een
 
 ## Functies
 
-- ✅ **Egg Support**: Gebruik alle Pterodactyl eggs
+- ✅ **Egg Support**: Gebruik alle Pterodactyl eggs (272 games ondersteund)
 - ✅ **Docker Containers**: Directe container management zonder nodes
-- ✅ **Modern Web UI**: React frontend met Pterodactyl-achtige interface
+- ✅ **Automatische Dependencies**: Docker images worden automatisch gedownload
+- ✅ **Modern Web UI**: React frontend met zoekfunctie en categorieën
 - ✅ **Real-time Logs**: Live server logs via WebSocket
 - ✅ **Port Management**: Eenvoudige poort configuratie
 - ✅ **File Manager**: Beheer server bestanden
-- ✅ **Multi-game Support**: Minecraft, CS2, ARK, en meer
+- ✅ **Multi-game Support**: Minecraft, CS2, ARK, Satisfactory en meer
+- ✅ **Smart Image Mapping**: Pterodactyl yolk images worden automatisch vervangen door standaard Docker images
 
 ## Systeemvereisten
 
@@ -114,6 +116,43 @@ DOCKER_NETWORK=game-panel-network
 ```bash
 docker network create game-panel-network
 ```
+
+## Stap 3.5: Docker Images Voorbereiden (Aanbevolen)
+
+Het panel downloadt automatisch benodigde Docker images, maar je kunt de meest gebruikte images vooraf installeren voor snellere server creation.
+
+### Automatische image setup (Linux/macOS)
+```bash
+# Maak script uitvoerbaar
+chmod +x scripts/setup-docker-images.sh
+
+# Voer setup uit
+./scripts/setup-docker-images.sh
+```
+
+### Handmatige image setup (Windows PowerShell)
+```powershell
+# Voer PowerShell script uit
+.\scripts\setup-docker-images.ps1
+```
+
+### Handmatige installatie
+```bash
+# Base images voor verschillende game types
+docker pull node:18-alpine          # Node.js games
+docker pull openjdk:17-jre-slim     # Minecraft (nieuwere versies)
+docker pull openjdk:11-jre-slim     # Minecraft (oudere versies)
+docker pull openjdk:8-jre-slim      # Legacy Java games
+docker pull python:3.11-slim       # Python games
+docker pull ubuntu:20.04           # SteamCMD games
+docker pull debian:bullseye-slim   # Linux-based games
+```
+
+**Ondersteunde Image Mappings:**
+- Pterodactyl Java images → OpenJDK images
+- Pterodactyl Node.js images → Official Node.js images  
+- Pterodactyl Python images → Official Python images
+- ParkervCP SteamCMD images → Ubuntu/Debian base images
 
 ## Stap 4: Panel Starten
 
