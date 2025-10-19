@@ -919,7 +919,7 @@ app.post('/api/servers/:id/start', async (req, res) => {
     try {
       console.log(`Setting up log streaming for server ${id}`);
       
-      // Method 1: Use attach for real-time streaming
+      // Use attach for real-time streaming
       const attachStream = await container.attach({
         stream: true,
         stdout: true,
@@ -927,29 +927,49 @@ app.post('/api/servers/:id/start', async (req, res) => {
         logs: true
       });
       
-      attachStream.setEncoding('utf8');
+      console.log(`Attach stream created for server ${id}`);
       
-      attachStream.on('data', (data) => {
+      // Process the stream data
+      attachStream.on('data', (chunk) => {
         try {
-          // Remove Docker multiplexing headers and ANSI codes
-          const lines = data.toString()
-            .replace(/[\x00-\x08]/g, '') // Remove control characters
-            .split('\n')
-            .filter(line => line.trim().length > 0);
+          // Docker uses 8-byte headers for multiplexed streams
+          // Parse the Docker stream format properly
+          let pos = 0;
           
-          lines.forEach(line => {
-            const cleanLine = line.trim();
-            if (cleanLine) {
-              console.log(`[Server ${id}] ${cleanLine}`);
-              io.to(`server_${id}`).emit('server_log', { 
+          while (pos < chunk.length) {
+            // Need at least 8 bytes for header
+            if (pos + 8 > chunk.length) break;
+            
+            // Read the payload size from bytes 4-7 (big endian)
+            const size = chunk.readUInt32BE(pos + 4);
+            
+            // Check if we have the complete payload
+            if (pos + 8 + size > chunk.length) break;
+            
+            // Extract the payload (skip 8-byte header)
+            const payload = chunk.slice(pos + 8, pos + 8 + size);
+            const logLine = payload.toString('utf8').trim();
+            
+            if (logLine) {
+              console.log(`[Server ${id}] ${logLine}`);
+              
+              // Emit to WebSocket room AND broadcast to all
+              const logData = { 
                 serverId: id, 
-                log: cleanLine,
+                log: logLine,
                 timestamp: new Date().toISOString()
-              });
+              };
+              
+              io.to(`server_${id}`).emit('server_log', logData);
+              
+              // Also emit directly to ensure it's received
+              io.emit('server_log', logData);
             }
-          });
+            
+            pos += 8 + size;
+          }
         } catch (err) {
-          console.error(`Error processing log data:`, err);
+          console.error(`Error processing log data for ${id}:`, err);
         }
       });
       
@@ -960,6 +980,8 @@ app.post('/api/servers/:id/start', async (req, res) => {
       attachStream.on('end', () => {
         console.log(`Attach stream ended for server ${id}`);
       });
+      
+      console.log(`Log streaming fully configured for server ${id}`);
       
     } catch (logError) {
       console.error(`Failed to setup log streaming for server ${id}:`, logError);
