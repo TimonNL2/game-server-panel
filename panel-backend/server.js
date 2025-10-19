@@ -915,77 +915,56 @@ app.post('/api/servers/:id/start', async (req, res) => {
     await container.start();
     console.log(`Container game_server_${id} started successfully`);
     
-    // Setup log streaming using tail -f approach
+    // Setup SIMPLE and RELIABLE log streaming
     try {
       console.log(`Setting up log streaming for server ${id}`);
       
-      const serverDir = path.join(SERVER_DATA_PATH, id);
-      const logFile = path.join(serverDir, 'logs', 'latest.log');
-      
-      // Track last read position
-      let lastSize = 0;
-      
-      // Function to read new log lines
-      const readNewLogs = () => {
+      // Poll Docker logs every second - simple and works!
+      const streamLogs = async () => {
         try {
-          // Check if log file exists
-          if (!fs.existsSync(logFile)) {
-            return;
-          }
+          const logs = await container.logs({
+            stdout: true,
+            stderr: true,
+            tail: 20,
+            timestamps: false
+          });
           
-          const stats = fs.statSync(logFile);
-          const currentSize = stats.size;
+          // Convert buffer to string and clean it up
+          const logText = logs.toString('utf8')
+            .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F]/g, '') // Remove control chars except newline
+            .split('\n')
+            .filter(line => line.trim().length > 0);
           
-          // Only read if file grew
-          if (currentSize > lastSize) {
-            const stream = fs.createReadStream(logFile, {
-              start: lastSize,
-              end: currentSize,
-              encoding: 'utf8'
-            });
+          logText.forEach(line => {
+            console.log(`[Server ${id}] ${line}`);
             
-            let buffer = '';
-            
-            stream.on('data', (chunk) => {
-              buffer += chunk;
-              const lines = buffer.split('\n');
-              
-              // Keep last incomplete line in buffer
-              buffer = lines.pop() || '';
-              
-              // Emit complete lines
-              lines.forEach(line => {
-                if (line.trim()) {
-                  console.log(`[Server ${id}] ${line}`);
-                  
-                  io.to(`server_${id}`).emit('server_log', { 
-                    serverId: id, 
-                    log: line.trim(),
-                    timestamp: new Date().toISOString()
-                  });
-                }
-              });
+            io.to(`server_${id}`).emit('server_log', { 
+              serverId: id, 
+              log: line,
+              timestamp: new Date().toISOString()
             });
-            
-            stream.on('end', () => {
-              lastSize = currentSize;
-            });
-          }
+          });
+          
         } catch (err) {
-          // Log file might not exist yet
+          if (err.statusCode !== 404) {
+            console.error(`Log error for ${id}:`, err.message);
+          }
         }
       };
       
-      // Poll log file every 500ms
-      const logInterval = setInterval(readNewLogs, 500);
+      // Initial logs
+      await streamLogs();
       
-      // Store interval so we can clear it later
+      // Poll every second
+      const logInterval = setInterval(streamLogs, 1000);
+      
+      // Store interval for cleanup
       if (!global.serverLogIntervals) {
         global.serverLogIntervals = new Map();
       }
       global.serverLogIntervals.set(id, logInterval);
       
-      console.log(`Log streaming started for server ${id}`);
+      console.log(`Log polling started for server ${id}`);
       
     } catch (logError) {
       console.error(`Failed to setup log streaming for server ${id}:`, logError);
