@@ -931,13 +931,24 @@ app.post('/api/servers/:id/start', async (req, res) => {
     try {
       console.log(`Setting up log streaming for server ${id}`);
       
-      // Poll Docker logs every second - simple and works!
+      // Poll Docker logs every 2 seconds with larger tail for better visibility
       const streamLogs = async () => {
         try {
+          // Check if container is still running
+          const info = await container.inspect();
+          if (!info.State.Running) {
+            console.log(`Container ${id} stopped, clearing log stream`);
+            if (global.serverLogIntervals && global.serverLogIntervals.has(id)) {
+              clearInterval(global.serverLogIntervals.get(id));
+              global.serverLogIntervals.delete(id);
+            }
+            return;
+          }
+          
           const logs = await container.logs({
             stdout: true,
             stderr: true,
-            tail: 20,
+            tail: 50,  // Increased from 20 to 50
             timestamps: false
           });
           
@@ -967,8 +978,8 @@ app.post('/api/servers/:id/start', async (req, res) => {
       // Initial logs
       await streamLogs();
       
-      // Poll every second
-      const logInterval = setInterval(streamLogs, 1000);
+      // Poll every 2 seconds (reduced frequency for less spam)
+      const logInterval = setInterval(streamLogs, 2000);
       
       // Store interval for cleanup
       if (!global.serverLogIntervals) {
@@ -976,7 +987,8 @@ app.post('/api/servers/:id/start', async (req, res) => {
       }
       global.serverLogIntervals.set(id, logInterval);
       
-      console.log(`Log polling started for server ${id}`);
+      console.log(`Log polling started for server ${id} (2s interval, 50 line tail)`);
+
       
     } catch (logError) {
       console.error(`Failed to setup log streaming for server ${id}:`, logError);
