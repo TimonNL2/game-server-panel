@@ -16,7 +16,8 @@ function CreateServer() {
     cpu: 100,
     disk: 5000,
     ports: [{ internal: 25565, external: 25565 }],
-    environment: {}
+    environment: {},
+    startupCommand: ''
   });
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -53,9 +54,13 @@ function CreateServer() {
       });
     }
 
+    // Set startup command from egg
+    const startupCmd = eggData.startup || '';
+
     setFormData(prev => ({
       ...prev,
-      environment: envVars
+      environment: envVars,
+      startupCommand: startupCmd
     }));
   };
 
@@ -460,6 +465,29 @@ function CreateServer() {
                           )}
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Startup Command */}
+                {selectedEgg && (
+                  <div>
+                    <h3 className="text-white font-medium mb-3">Startup Command</h3>
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-2">
+                        Startup Command
+                        <span className="text-gray-500 text-xs ml-2">(Geavanceerd - pas alleen aan als je weet wat je doet)</span>
+                      </label>
+                      <textarea
+                        value={formData.startupCommand}
+                        onChange={(e) => setFormData({...formData, startupCommand: e.target.value})}
+                        className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                        rows="3"
+                        placeholder="java -Xms128M -Xmx{{SERVER_MEMORY}}M -jar server.jar"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">
+                        Gebruik variables zoals {'{{SERVER_MEMORY}}'} die automatisch worden vervangen
+                      </p>
                     </div>
                   </div>
                 )}

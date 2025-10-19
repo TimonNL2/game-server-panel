@@ -328,7 +328,7 @@ async function pullDockerImage(imageName) {
 
 // Helper function to create Docker container
 async function createGameServer(serverConfig) {
-  const { id, name, egg, environment, ports, memory } = serverConfig;
+  const { id, name, egg, environment, ports, memory, startupCommand } = serverConfig;
   
   const serverDir = path.join(SERVER_DATA_PATH, id);
   fs.ensureDirSync(serverDir);
@@ -406,10 +406,28 @@ async function createGameServer(serverConfig) {
   // Add server memory
   envVars.push(`SERVER_MEMORY=${memory}`);
   
+  // Process startup command - replace variables
+  let processedStartupCommand = startupCommand || '';
+  if (processedStartupCommand) {
+    // Replace common variables
+    processedStartupCommand = processedStartupCommand.replace(/\{\{SERVER_MEMORY\}\}/g, memory.toString());
+    processedStartupCommand = processedStartupCommand.replace(/\{\{SERVER_PORT\}\}/g, ports[0]?.internal || '25565');
+    
+    // Replace environment variables
+    for (const [key, value] of Object.entries(environment)) {
+      const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+      processedStartupCommand = processedStartupCommand.replace(regex, value.toString());
+    }
+  }
+  
+  console.log(`Using startup command: ${processedStartupCommand}`);
+  
+  // Configure container with startup command
   const containerConfig = {
     name: `game_server_${id}`,
     Image: dockerImage,
     Env: envVars,
+    Cmd: processedStartupCommand ? ['/bin/sh', '-c', processedStartupCommand] : undefined,
     HostConfig: {
       PortBindings: portBindings,
       Memory: memory * 1024 * 1024, // Convert MB to bytes
@@ -418,7 +436,9 @@ async function createGameServer(serverConfig) {
     },
     ExposedPorts: exposedPorts,
     WorkingDir: '/home/container',
-    User: '1000:1000'
+    User: '1000:1000',
+    Tty: true,
+    OpenStdin: true
   };
   
   try {
@@ -490,7 +510,7 @@ app.post('/api/servers', async (req, res) => {
   try {
     console.log('Creating server with request body:', req.body);
     
-    const { name, egg, environment, ports, memory = 1024, cpu = 100, disk = 5000 } = req.body;
+    const { name, egg, environment, ports, memory = 1024, cpu = 100, disk = 5000, startupCommand } = req.body;
     
     if (!name || !egg) {
       return res.status(400).json({ error: 'Name and egg are required' });
@@ -548,6 +568,7 @@ app.post('/api/servers', async (req, res) => {
       memory: parseInt(memory),
       cpu: parseInt(cpu),
       disk: parseInt(disk),
+      startupCommand: startupCommand || eggConfig.startup || '',
       status: 'stopped',
       created: new Date().toISOString()
     };
