@@ -467,7 +467,7 @@ async function runServerInstallation(serverConfig, eggData) {
 
 // Helper function to create Docker container
 async function createGameServer(serverConfig) {
-  const { id, name, egg, environment, ports, memory, startupCommand } = serverConfig;
+  const { id, name, egg, eggData, environment, ports, memory, startupCommand } = serverConfig;
   
   const serverDir = path.join(SERVER_DATA_PATH, id);
   fs.ensureDirSync(serverDir);
@@ -508,7 +508,14 @@ async function createGameServer(serverConfig) {
         'ghcr.io/pterodactyl/yolks:steamcmd': 'steamcmd/steamcmd:latest'
       };
       
-      // For Minecraft servers, try to use Java 21 by default for modern versions
+      // Check if we have a mapping for this image
+      if (imageMap[preferredImage]) {
+        dockerImage = imageMap[preferredImage];
+      } else {
+        dockerImage = preferredImage;
+      }
+      
+      // For Minecraft servers, override to use Java 21 by default for modern versions
       if ((egg.name && egg.name.toLowerCase().includes('fabric')) || 
           (egg.name && egg.name.toLowerCase().includes('forge')) ||
           (egg.name && egg.name.toLowerCase().includes('paper')) ||
@@ -519,13 +526,6 @@ async function createGameServer(serverConfig) {
         dockerImage = 'eclipse-temurin:21-jre';
         originalImage = 'ghcr.io/pterodactyl/yolks:java_21';
         console.log('Using Java 21 for modern Minecraft server');
-      }
-      
-      // Check if we have a mapping for this image
-      if (imageMap[preferredImage]) {
-        dockerImage = imageMap[preferredImage];
-      } else {
-        dockerImage = preferredImage;
       }
     }
   }
@@ -598,7 +598,7 @@ async function createGameServer(serverConfig) {
     }
     
     // For Fabric servers, use fabric-server-launch.jar if it exists
-    if (config.eggData && config.eggData.name && config.eggData.name.toLowerCase().includes('fabric')) {
+    if (eggData && eggData.name && eggData.name.toLowerCase().includes('fabric')) {
       processedStartupCommand = `
 if [ -f fabric-server-launch.jar ]; then
   echo "Starting Fabric server with fabric-server-launch.jar"
