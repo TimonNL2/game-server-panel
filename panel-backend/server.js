@@ -398,8 +398,7 @@ async function runServerInstallation(serverConfig, eggData) {
       Env: installEnv,
       HostConfig: {
         Binds: [`${serverDir}:/mnt/server`],
-        Memory: 2 * 1024 * 1024 * 1024, // 2GB for installation
-        AutoRemove: true
+        Memory: 2 * 1024 * 1024 * 1024 // 2GB for installation
       },
       WorkingDir: '/mnt/server'
     };
@@ -408,10 +407,34 @@ async function runServerInstallation(serverConfig, eggData) {
     const installContainer = await docker.createContainer(installContainerConfig);
     
     console.log(`Starting installation process for server ${serverConfig.name}...`);
+    
+    // Get logs before starting to track installation progress
+    const logStream = await installContainer.logs({
+      follow: true,
+      stdout: true,
+      stderr: true
+    });
+    
+    // Start the container
     await installContainer.start();
     
-    // Wait for installation to complete and get logs
+    // Wait for installation to complete
     const installResult = await installContainer.wait();
+    
+    // Get final logs
+    const finalLogs = await installContainer.logs({
+      stdout: true,
+      stderr: true
+    });
+    
+    console.log(`Installation logs for ${serverConfig.name}:`, finalLogs.toString());
+    
+    // Clean up container
+    try {
+      await installContainer.remove();
+    } catch (removeError) {
+      console.log('Container already removed or cleanup failed:', removeError.message);
+    }
     
     if (installResult.StatusCode === 0) {
       console.log(`✓ Installation completed successfully for server ${serverConfig.name}`);
@@ -425,14 +448,6 @@ async function runServerInstallation(serverConfig, eggData) {
       return true;
     } else {
       console.error(`✗ Installation failed for server ${serverConfig.name} with exit code: ${installResult.StatusCode}`);
-      
-      // Get installation logs for debugging
-      const logs = await installContainer.logs({
-        stdout: true,
-        stderr: true
-      });
-      console.error('Installation logs:', logs.toString());
-      
       return false;
     }
     
