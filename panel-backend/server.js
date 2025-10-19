@@ -45,10 +45,19 @@ io.on('connection', (socket) => {
   });
   
   socket.on('join_server', (serverId) => {
+    console.log(`Client ${socket.id} joined server_${serverId}`);
     socket.join(`server_${serverId}`);
+    
+    // Send a test message to confirm connection
+    socket.emit('server_log', {
+      serverId,
+      log: `Console connected to server ${serverId}`,
+      timestamp: new Date().toISOString()
+    });
   });
   
   socket.on('leave_server', (serverId) => {
+    console.log(`Client ${socket.id} left server_${serverId}`);
     socket.leave(`server_${serverId}`);
   });
 });
@@ -660,25 +669,74 @@ app.get('/api/servers/:id', async (req, res) => {
 app.post('/api/servers/:id/start', async (req, res) => {
   try {
     const { id } = req.params;
+    console.log(`Starting server ${id}...`);
+    
     const container = docker.getContainer(`game_server_${id}`);
     
+    // Check if container exists
+    try {
+      await container.inspect();
+      console.log(`Container game_server_${id} exists`);
+    } catch (error) {
+      console.error(`Container game_server_${id} does not exist:`, error.message);
+      return res.status(404).json({ error: 'Container not found' });
+    }
+    
     await container.start();
+    console.log(`Container game_server_${id} started successfully`);
     
-    // Setup log streaming
-    const logStream = await container.logs({
-      follow: true,
-      stdout: true,
-      stderr: true,
-      timestamps: true
-    });
-    
-    logStream.on('data', (chunk) => {
-      const log = chunk.toString();
-      io.to(`server_${id}`).emit('server_log', { serverId: id, log });
-    });
+    // Setup log streaming with better error handling
+    try {
+      const logStream = await container.logs({
+        follow: true,
+        stdout: true,
+        stderr: true,
+        timestamps: true
+      });
+      
+      console.log(`Log streaming setup for server ${id}`);
+      
+      logStream.on('data', (chunk) => {
+        const log = chunk.toString().trim();
+        if (log) {
+          console.log(`[Server ${id}] Log:`, log);
+          io.to(`server_${id}`).emit('server_log', { 
+            serverId: id, 
+            log: log,
+            timestamp: new Date().toISOString()
+          });
+        }
+      });
+      
+      logStream.on('error', (error) => {
+        console.error(`Log stream error for server ${id}:`, error);
+      });
+      
+      // Also get existing logs
+      const existingLogs = await container.logs({
+        stdout: true,
+        stderr: true,
+        timestamps: true,
+        tail: 100
+      });
+      
+      const existingLogData = existingLogs.toString().trim();
+      if (existingLogData) {
+        console.log(`[Server ${id}] Existing logs:`, existingLogData);
+        io.to(`server_${id}`).emit('server_log', { 
+          serverId: id, 
+          log: existingLogData,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+    } catch (logError) {
+      console.error(`Failed to setup log streaming for server ${id}:`, logError);
+    }
     
     res.json({ message: 'Server started' });
   } catch (error) {
+    console.error(`Error starting server ${id}:`, error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -807,6 +865,91 @@ app.get('/api/servers/:id/files', async (req, res) => {
       res.json({ type: 'file', content });
     }
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Test endpoint - send test log to server console
+app.post('/api/servers/:id/test-log', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { message } = req.body;
+    
+    const testMessage = message || `Test log message at ${new Date().toISOString()}`;
+    
+    console.log(`Sending test log to server ${id}:`, testMessage);
+    
+    io.to(`server_${id}`).emit('server_log', {
+      serverId: id,
+      log: testMessage,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.json({ 
+      message: 'Test log sent',
+      sentTo: `server_${id}`,
+      log: testMessage
+    });
+    
+  } catch (error) {
+    console.error(`Error sending test log:`, error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint - get container details
+app.get('/api/servers/:id/debug', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const containerName = `game_server_${id}`;
+    
+    console.log(`Debug request for server ${id}, container: ${containerName}`);
+    
+    // Check if container exists
+    try {
+      const container = docker.getContainer(containerName);
+      const containerInfo = await container.inspect();
+      
+      // Get recent logs
+      const logs = await container.logs({
+        stdout: true,
+        stderr: true,
+        timestamps: true,
+        tail: 50
+      });
+      
+      const debugInfo = {
+        containerId: containerInfo.Id,
+        containerName: containerInfo.Name,
+        state: containerInfo.State,
+        config: {
+          image: containerInfo.Config.Image,
+          cmd: containerInfo.Config.Cmd,
+          env: containerInfo.Config.Env,
+          workingDir: containerInfo.Config.WorkingDir
+        },
+        hostConfig: {
+          portBindings: containerInfo.HostConfig.PortBindings,
+          binds: containerInfo.HostConfig.Binds,
+          memory: containerInfo.HostConfig.Memory
+        },
+        logs: logs.toString()
+      };
+      
+      console.log(`Debug info for ${id}:`, JSON.stringify(debugInfo, null, 2));
+      res.json(debugInfo);
+      
+    } catch (containerError) {
+      console.error(`Container ${containerName} not found:`, containerError.message);
+      res.status(404).json({ 
+        error: 'Container not found',
+        containerName,
+        details: containerError.message
+      });
+    }
+    
+  } catch (error) {
+    console.error(`Debug error for server ${id}:`, error);
     res.status(500).json({ error: error.message });
   }
 });
