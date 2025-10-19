@@ -509,16 +509,16 @@ async function createGameServer(serverConfig) {
       };
       
       // For Minecraft servers, try to use Java 21 by default for modern versions
-      if (egg.name && egg.name.toLowerCase().includes('fabric') || 
-          egg.name && egg.name.toLowerCase().includes('forge') ||
-          egg.name && egg.name.toLowerCase().includes('paper') ||
-          egg.name && egg.name.toLowerCase().includes('purpur')) {
-        // Check if Java 21 is in the available images
-        const hasJava21 = Object.values(egg.docker_images || {}).some(img => img.includes('java_21'));
-        if (hasJava21) {
-          dockerImage = 'eclipse-temurin:21-jre';
-          originalImage = 'ghcr.io/pterodactyl/yolks:java_21';
-        }
+      if ((egg.name && egg.name.toLowerCase().includes('fabric')) || 
+          (egg.name && egg.name.toLowerCase().includes('forge')) ||
+          (egg.name && egg.name.toLowerCase().includes('paper')) ||
+          (egg.name && egg.name.toLowerCase().includes('purpur')) ||
+          (egg.name && egg.name.toLowerCase().includes('folia')) ||
+          (egg.name && egg.name.toLowerCase().includes('spigot'))) {
+        // Modern Minecraft versions need Java 21
+        dockerImage = 'eclipse-temurin:21-jre';
+        originalImage = 'ghcr.io/pterodactyl/yolks:java_21';
+        console.log('Using Java 21 for modern Minecraft server');
       }
       
       // Check if we have a mapping for this image
@@ -596,6 +596,22 @@ async function createGameServer(serverConfig) {
       const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
       processedStartupCommand = processedStartupCommand.replace(regex, value.toString());
     }
+    
+    // For Fabric servers, use fabric-server-launch.jar if it exists
+    if (config.eggData && config.eggData.name && config.eggData.name.toLowerCase().includes('fabric')) {
+      processedStartupCommand = `
+if [ -f fabric-server-launch.jar ]; then
+  echo "Starting Fabric server with fabric-server-launch.jar"
+  ${processedStartupCommand.replace(/server\.jar|{{SERVER_JARFILE}}/g, 'fabric-server-launch.jar')}
+elif [ -f server.jar ]; then
+  echo "Starting server with server.jar"
+  ${processedStartupCommand}
+else
+  echo "No server jar found!"
+  exit 1
+fi
+      `.trim();
+    }
   }
   
   console.log(`Using startup command: ${processedStartupCommand}`);
@@ -605,7 +621,14 @@ async function createGameServer(serverConfig) {
     name: `game_server_${id}`,
     Image: dockerImage,
     Env: envVars,
-    Cmd: processedStartupCommand ? ['/bin/sh', '-c', processedStartupCommand] : undefined,
+    Cmd: processedStartupCommand ? ['/bin/sh', '-c', `
+      # Fix permissions first
+      chown -R 1000:1000 /home/container 2>/dev/null || true
+      chmod -R 755 /home/container 2>/dev/null || true
+      
+      # Switch to container user and run startup command
+      su -s /bin/sh -c '${processedStartupCommand.replace(/'/g, "'\\''")}' container || ${processedStartupCommand}
+    `] : undefined,
     HostConfig: {
       PortBindings: portBindings,
       Memory: memory * 1024 * 1024, // Convert MB to bytes
@@ -614,7 +637,7 @@ async function createGameServer(serverConfig) {
     },
     ExposedPorts: exposedPorts,
     WorkingDir: '/home/container',
-    User: '1000:1000',
+    User: '0:0', // Start as root to fix permissions, then switch to container user
     Tty: true,
     OpenStdin: true
   };
